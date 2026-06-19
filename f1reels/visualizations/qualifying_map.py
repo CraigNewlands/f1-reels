@@ -17,7 +17,6 @@ _TILT = 0.42
 _VIEWPORT_FRAC = 0.22
 _MAP_ASPECT = 1.20
 _CAM_SMOOTH_WINDOW = 40
-_SMOOTH_W = 9       # GPS smoothing window for raw position series
 _N_CAM = 500        # pre-computed camera path resolution
 
 
@@ -34,8 +33,14 @@ def _rolling_mean(arr: np.ndarray, window: int) -> np.ndarray:
     return np.convolve(padded, np.ones(window) / window, mode="valid")[: len(arr)]
 
 
-def _smooth(arr: np.ndarray, w: int = _SMOOTH_W) -> np.ndarray:
-    return _rolling_mean(arr, w)
+def _frac_interp(fraction: float, values: np.ndarray) -> float:
+    """Scalar: interpolate into values using a 0→1 fraction."""
+    return float(np.interp(fraction, np.linspace(0, 1, len(values)), values))
+
+
+def _frac_interp_array(fractions: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Vector: interpolate into values for an array of 0→1 fractions."""
+    return np.interp(fractions, np.linspace(0, 1, len(values)), values)
 
 
 def _pca_rotation_angle(x: np.ndarray, y: np.ndarray) -> float:
@@ -56,19 +61,6 @@ def _perspective(x: np.ndarray, y: np.ndarray, rotate_deg: float, tilt: float):
     yr = x * np.sin(theta) + y * np.cos(theta)
     return xr, yr * tilt
 
-
-def _raw_time_pos(lap):
-    """
-    Return (t, x, y) from raw telemetry — lap-relative time, smoothed GPS.
-    Uses np.interp-friendly monotonic time array.
-    """
-    tel = lap.get_telemetry().dropna(subset=["X", "Y"]).reset_index(drop=True)
-    t = tel["Time"].dt.total_seconds().values
-    t = t - t[0]                          # lap-relative: starts at 0
-    t = np.maximum.accumulate(t)          # guarantee monotonic
-    x = _smooth(tel["X"].values)
-    y = _smooth(tel["Y"].values)
-    return t, x, y
 
 
 class QualifyingMap(Visualization):
@@ -104,45 +96,42 @@ class QualifyingMap(Visualization):
             "color": driver_color(r2["Abbreviation"], r2.get("TeamName", "")),
         }
 
-        # arc-length telemetry — used for track outline, speed, delta
         self.tel1 = build_telemetry(lap1)
         self.tel2 = build_telemetry(lap2)
 
-        # Raw time series for smooth position interpolation.
-        # np.interp(T, t_raw, pos_raw) gives each car's exact position at
-        # any elapsed lap time T without any index mapping or searchsorted.
-        t1, x1, y1 = _raw_time_pos(lap1)
-        t2, x2, y2 = _raw_time_pos(lap2)
+        # Lap times from arc-length telemetry (lap-relative, starts at 0)
+        self._t1_laptime = float(self.tel1["TimeS"].values[-1])
+        self._t2_laptime = float(self.tel2["TimeS"].values[-1])
 
-        # Compute perspective rotation from d1's track shape (pre-transform)
-        rotate_deg = _pca_rotation_angle(x1, y1)
+        # Mini-map uses original (pre-perspective) coordinates
+        self._orig1_x = self.tel1["X"].values.copy()
+        self._orig1_y = self.tel1["Y"].values.copy()
+        self._orig2_x = self.tel2["X"].values.copy()
+        self._orig2_y = self.tel2["Y"].values.copy()
 
-        # Project raw positions
-        x1p, y1p = _perspective(x1, y1, rotate_deg, _TILT)
-        x2p, y2p = _perspective(x2, y2, rotate_deg, _TILT)
-
-        self._t1, self._x1p, self._y1p = t1, x1p, y1p   # projected, for main map
-        self._t2, self._x2p, self._y2p = t2, x2p, y2p
-        self._x1r, self._y1r = x1, y1                    # raw, for mini-map
-        self._x2r, self._y2r = x2, y2
-
-        self._t_max = float(t1[-1])   # animation runs for d1's lap duration
-
-        # Also project the arc-length telemetry (used for track drawing)
+        # Apply perspective transform to both telemetry sets
+        rotate_deg = _pca_rotation_angle(self.tel1["X"].values, self.tel1["Y"].values)
         for attr in ("tel1", "tel2"):
             tel = getattr(self, attr).copy()
             px, py = _perspective(tel["X"].values, tel["Y"].values, rotate_deg, _TILT)
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Pre-compute smoothed camera path at _N_CAM time steps
-        T_grid = np.linspace(0, self._t_max, _N_CAM)
-        cam_x = (np.interp(T_grid, t1, x1p) + np.interp(T_grid, t2, x2p)) / 2
-        cam_y = (np.interp(T_grid, t1, y1p) + np.interp(T_grid, t2, y2p)) / 2
+        # Pre-compute smoothed camera path.
+        # f1 advances linearly 0→1 over the animation; f2 advances more slowly
+        # because d2 took longer, so d2 is always behind d1 on track.
+        ratio = self._t1_laptime / self._t2_laptime   # < 1 since d1 is faster
+        f1_grid = np.linspace(0, 1, _N_CAM)
+        f2_grid = f1_grid * ratio
+        cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
+                 _frac_interp_array(f2_grid, self.tel2["X"].values)) / 2
+        cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
+                 _frac_interp_array(f2_grid, self.tel2["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
+        self._lap_ratio = ratio
 
-        # Delta trace: at each arc-length step, how many seconds is d2 behind?
+        # Delta trace: seconds d2 is behind at each arc-length position
         self._delta = self.tel2["TimeS"].values - self.tel1["TimeS"].values
 
         x = self.tel1["X"].values
@@ -193,7 +182,7 @@ class QualifyingMap(Visualization):
         self._ax_mini = self._ax_bot.inset_axes([0.67, 0.04, 0.31, 0.92])
         self._ax_mini.set_facecolor(_BG)
         self._ax_mini.axis("off")
-        mx, my = self._x1r, self._y1r
+        mx, my = self._orig1_x, self._orig1_y
         self._ax_mini.plot(mx, my, color="#2a2a2a", linewidth=4, solid_capstyle="round")
         self._ax_mini.plot(mx, my, color="#555555", linewidth=2, solid_capstyle="round")
         self._ax_mini.set_aspect("equal")
@@ -221,13 +210,17 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
-        T = progress * self._t_max
 
-        # Direct interpolation — no index mapping, no searchsorted
-        x1 = float(np.interp(T, self._t1, self._x1p))
-        y1 = float(np.interp(T, self._t1, self._y1p))
-        x2 = float(np.interp(T, self._t2, self._x2p))
-        y2 = float(np.interp(T, self._t2, self._y2p))
+        # d1 fraction = progress; d2 fraction = progress * (t1/t2)
+        # Because t1 < t2 (d1 faster), f2 < f1 → d2 always behind d1 on track.
+        # Using float fractions + np.interp avoids int-truncation erasing small gaps.
+        f1 = progress
+        f2 = progress * self._lap_ratio
+
+        x1 = _frac_interp(f1, self.tel1["X"].values)
+        y1 = _frac_interp(f1, self.tel1["Y"].values)
+        x2 = _frac_interp(f2, self.tel2["X"].values)
+        y2 = _frac_interp(f2, self.tel2["Y"].values)
 
         cam_idx = int(progress * (_N_CAM - 1))
         self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
@@ -244,20 +237,19 @@ class QualifyingMap(Visualization):
 
         # Mini-map in original (pre-perspective) coordinates
         self._mini_dot1.set_data(
-            [float(np.interp(T, self._t1, self._x1r))],
-            [float(np.interp(T, self._t1, self._y1r))],
+            [_frac_interp(f1, self._orig1_x)],
+            [_frac_interp(f1, self._orig1_y)],
         )
         self._mini_dot2.set_data(
-            [float(np.interp(T, self._t2, self._x2r))],
-            [float(np.interp(T, self._t2, self._y2r))],
+            [_frac_interp(f2, self._orig2_x)],
+            [_frac_interp(f2, self._orig2_y)],
         )
 
-        # Delta at equivalent arc-length position
-        idx = int(progress * (len(self._delta) - 1))
+        idx = int(f1 * (len(self._delta) - 1))
         delta = self._delta[idx]
 
         self._draw_top()
-        self._draw_bottom(progress, delta, T)
+        self._draw_bottom(progress, delta, f2)
 
     def _draw_top(self) -> None:
         ax = self._ax_top
@@ -272,7 +264,7 @@ class QualifyingMap(Visualization):
         ax.text(0.5, 0.28, "TOP 2  ·  Q LAP COMPARISON", color=_TEXT_DIM,
                 fontsize=9, ha="center", va="center", fontfamily="monospace")
 
-    def _draw_bottom(self, progress: float, delta: float, T: float) -> None:
+    def _draw_bottom(self, progress: float, delta: float, f2: float) -> None:
         ax = self._ax_bot
         ax.cla()
         ax.set_facecolor(_BG)
