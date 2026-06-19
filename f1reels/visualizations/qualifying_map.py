@@ -104,14 +104,26 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Both cars animate at the same normalised distance index.
-        # delta[i] = time d2 took to reach NormDist[i] minus d1's time.
-        # Positive → d1 is faster here → d1 stacks on top.
-        self._delta = self.tel2["TimeS"].values - self.tel1["TimeS"].values
+        # Time-based real positions.
+        # At each animation step we advance d1 by one telemetry point, then
+        # place d2 at wherever it physically was at that same elapsed time.
+        # d1 (pole) will be ahead on track; d2 trails behind.
+        t1 = self.tel1["TimeS"].values
+        t2 = self.tel2["TimeS"].values
 
-        # Camera: midpoint of both racing lines, smoothed.
-        cam_x_raw = (self.tel1["X"].values + self.tel2["X"].values) / 2
-        cam_y_raw = (self.tel1["Y"].values + self.tel2["Y"].values) / 2
+        t2_mono = np.maximum.accumulate(t2)
+        d2_at_t1 = np.searchsorted(t2_mono, t1, side="left").clip(0, len(t2) - 1)
+        d2_at_t1 = np.maximum.accumulate(d2_at_t1)
+        self._d2_idx = d2_at_t1
+
+        # Gap trace: at d1's current track position, how many seconds behind is d2?
+        norm2 = self.tel2["NormDist"].values
+        d2_at_norm1 = np.searchsorted(norm2, self.tel1["NormDist"].values).clip(0, len(norm2) - 1)
+        self._delta = t2[d2_at_norm1] - t1
+
+        # Camera: midpoint of both real positions, smoothed to kill jitter.
+        cam_x_raw = (self.tel1["X"].values + self.tel2["X"].values[d2_at_t1]) / 2
+        cam_y_raw = (self.tel1["Y"].values + self.tel2["Y"].values[d2_at_t1]) / 2
         self._cam_x = _rolling_mean(cam_x_raw, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y_raw, _CAM_SMOOTH_WINDOW)
 
@@ -198,15 +210,16 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
-        idx = int(progress * (len(self.tel1) - 1))
+        idx1 = int(progress * (len(self.tel1) - 1))
+        idx2 = int(self._d2_idx[idx1])
 
-        x1, y1 = self.tel1["X"].iloc[idx], self.tel1["Y"].iloc[idx]
-        x2, y2 = self.tel2["X"].iloc[idx], self.tel2["Y"].iloc[idx]
+        x1, y1 = self.tel1["X"].iloc[idx1], self.tel1["Y"].iloc[idx1]
+        x2, y2 = self.tel2["X"].iloc[idx2], self.tel2["Y"].iloc[idx2]
 
-        self._pan_to(self._cam_x[idx], self._cam_y[idx])
+        self._pan_to(self._cam_x[idx1], self._cam_y[idx1])
 
         label_dy = self._viewport_r * 0.10
-        delta = self._delta[idx]
+        delta = self._delta[idx1]
 
         for halo, dot, lbl, x, y in (
             (self._halo1, self._dot1, self._lbl1, x1, y1),
@@ -216,11 +229,11 @@ class QualifyingMap(Visualization):
             dot.set_data([x], [y])
             lbl.set_position((x, y + label_dy))
 
-        self._mini_dot1.set_data([self._orig1_x[idx]], [self._orig1_y[idx]])
-        self._mini_dot2.set_data([self._orig2_x[idx]], [self._orig2_y[idx]])
+        self._mini_dot1.set_data([self._orig1_x[idx1]], [self._orig1_y[idx1]])
+        self._mini_dot2.set_data([self._orig2_x[idx2]], [self._orig2_y[idx2]])
 
         self._draw_top()
-        self._draw_bottom(idx, progress, delta)
+        self._draw_bottom(idx1, idx2, progress, delta)
 
     def _draw_top(self) -> None:
         ax = self._ax_top
@@ -235,7 +248,7 @@ class QualifyingMap(Visualization):
         ax.text(0.5, 0.28, "TOP 2  ·  Q LAP COMPARISON", color=_TEXT_DIM,
                 fontsize=9, ha="center", va="center", fontfamily="monospace")
 
-    def _draw_bottom(self, idx: int, progress: float, delta: float) -> None:
+    def _draw_bottom(self, idx1: int, idx2: int, progress: float, delta: float) -> None:
         ax = self._ax_bot
         ax.cla()
         ax.set_facecolor(_BG)
@@ -243,8 +256,8 @@ class QualifyingMap(Visualization):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
 
-        s1 = self.tel1["Speed"].iloc[idx]
-        s2 = self.tel2["Speed"].iloc[idx]
+        s1 = self.tel1["Speed"].iloc[idx1]
+        s2 = self.tel2["Speed"].iloc[idx2]
         speed_ms = ((s1 + s2) / 2) / 3.6
         secs = abs(delta)
         metres = secs * speed_ms
