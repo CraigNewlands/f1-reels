@@ -9,7 +9,9 @@ def get_pole_laps(session, n: int = 2) -> list[tuple]:
     Return (result_row, fastest_lap) for the top n qualifying finishers.
     Uses session.results for position ordering and picks the fastest timed lap per driver.
     """
-    results = session.results.sort_values("Position").head(n)
+    results = session.results.copy()
+    results["Position"] = pd.to_numeric(results["Position"], errors="coerce")
+    results = results.sort_values("Position").head(n)
     pairs = []
     for _, row in results.iterrows():
         driver_laps = session.laps.pick_drivers(row["Abbreviation"])
@@ -54,10 +56,14 @@ def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
 
     x = tel["X"].values
     y = tel["Y"].values
-    time_s = tel["Time"].dt.total_seconds().values
     speed = tel["Speed"].values
 
-    # Arc length from GPS positions — this is what drives visual speed, not odometry
+    # Normalize to lap-relative time (FastF1 Time is session-absolute — subtract
+    # lap start so both drivers' clocks begin at 0, making delta meaningful)
+    time_s = tel["Time"].dt.total_seconds().values
+    time_s = time_s - time_s[0]
+
+    # Arc length from GPS positions — drives visually constant dot speed
     dx = np.diff(x, prepend=x[0])
     dy = np.diff(y, prepend=y[0])
     arc = np.cumsum(np.sqrt(dx**2 + dy**2))
