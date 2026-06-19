@@ -1,0 +1,56 @@
+name: Render Qualifying Reel
+
+# Trigger manually from the Actions tab after each qualifying session.
+# Future: switch 'workflow_dispatch' to 'schedule' with a cron that
+# fires after qualifying ends each Saturday of a race weekend.
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Season year (e.g. 2025)"
+        required: true
+        default: "2025"
+      round:
+        description: 'Round name (e.g. Monaco, Bahrain)'
+        required: true
+      viz:
+        description: "Visualization type"
+        required: false
+        default: "qualifying-map"
+      duration:
+        description: "Video duration in seconds"
+        required: false
+        default: "45"
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Render reel
+        env:
+          F1_OUTPUT_DIR: output
+        run: |
+          f1reels \
+            --year "${{ inputs.year }}" \
+            --round "${{ inputs.round }}" \
+            --viz "${{ inputs.viz }}" \
+            --duration "${{ inputs.duration }}"
+
+      - name: Upload reel
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-${{ inputs.round }}-${{ inputs.year }}
+          path: output/*.mp4
+          retention-days: 7
