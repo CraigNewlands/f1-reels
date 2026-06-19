@@ -150,18 +150,21 @@ class QualifyingMap(Visualization):
         # The "halo" (larger, same colour) peeks out from behind the leader.
         _lbl_kw = dict(fontsize=9, fontweight="bold", ha="center",
                        va="bottom", fontfamily="monospace")
-        _halo_kw = dict(markersize=19)   # slightly larger — visible behind leader
-        _dot_kw  = dict(markersize=13)   # main dot
 
-        (self._halo1,) = self._ax_map.plot([], [], "o", color=self.d1["color"], **_halo_kw)
-        (self._dot1,)  = self._ax_map.plot([], [], "o", color=self.d1["color"], **_dot_kw)
-        self._lbl1 = self._ax_map.text(0, 0, self.d1["abbr"],
-                                        color=self.d1["color"], **_lbl_kw)
-
-        (self._halo2,) = self._ax_map.plot([], [], "o", color=self.d2["color"], **_halo_kw)
-        (self._dot2,)  = self._ax_map.plot([], [], "o", color=self.d2["color"], **_dot_kw)
+        # d2 drawn first (behind), d1 always on top — HUD shows who leads
+        (self._halo2,) = self._ax_map.plot([], [], "o", color=self.d2["color"],
+                                            markersize=19, zorder=4)
+        (self._dot2,)  = self._ax_map.plot([], [], "o", color=self.d2["color"],
+                                            markersize=13, zorder=5)
         self._lbl2 = self._ax_map.text(0, 0, self.d2["abbr"],
-                                        color=self.d2["color"], **_lbl_kw)
+                                        color=self.d2["color"], zorder=6, **_lbl_kw)
+
+        (self._halo1,) = self._ax_map.plot([], [], "o", color=self.d1["color"],
+                                            markersize=19, zorder=7)
+        (self._dot1,)  = self._ax_map.plot([], [], "o", color=self.d1["color"],
+                                            markersize=13, zorder=8)
+        self._lbl1 = self._ax_map.text(0, 0, self.d1["abbr"],
+                                        color=self.d1["color"], zorder=9, **_lbl_kw)
 
         # Mini-map inset (bottom-right of ax_bot)
         self._ax_mini = self._ax_bot.inset_axes([0.67, 0.04, 0.31, 0.92])
@@ -204,15 +207,6 @@ class QualifyingMap(Visualization):
 
         label_dy = self._viewport_r * 0.10
         delta = self._delta[idx]
-        d1_ahead = delta >= 0   # d1 reached this point faster → sits on top
-
-        g1 = [self._halo1, self._dot1, self._lbl1]
-        g2 = [self._halo2, self._dot2, self._lbl2]
-        leader_a, trailer_a = (g1, g2) if d1_ahead else (g2, g1)
-        for i, a in enumerate(trailer_a):
-            a.set_zorder(4 + i)
-        for i, a in enumerate(leader_a):
-            a.set_zorder(8 + i)
 
         for halo, dot, lbl, x, y in (
             (self._halo1, self._dot1, self._lbl1, x1, y1),
