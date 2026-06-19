@@ -104,14 +104,28 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Delta at each telemetry point (positive → d2 is behind d1 in time)
-        self._delta = self.tel2["TimeS"].values - self.tel1["TimeS"].values
+        # --- Time-based real positions ------------------------------------
+        # Animate along d1's lap timeline.  At each step, d2 is placed at
+        # wherever it physically was at the same elapsed lap time.
+        # Because TimeS is now lap-relative (0 → lap time), d1 (pole) will
+        # genuinely be further along the track than d2 at any given moment.
+        t1 = self.tel1["TimeS"].values
+        t2 = self.tel2["TimeS"].values
+
+        # For each d1 time step, find d2's telemetry index at the same time
+        d2_at_t1 = np.searchsorted(t2, t1, side="left").clip(0, len(t2) - 1)
+        self._d2_idx = d2_at_t1
+
+        # Gap trace: at each track position (d1's NormDist), seconds d2 is behind
+        norm1 = self.tel1["NormDist"].values
+        norm2 = self.tel2["NormDist"].values
+        d2_same_pos = np.searchsorted(norm2, norm1).clip(0, len(norm2) - 1)
+        self._delta = t2[d2_same_pos] - t1   # positive → d2 slower
 
         # --- Smoothed camera path -----------------------------------------
-        # Both cars share the same normalised-distance index so the midpoint
-        # is the average of the two racing lines, smoothed to kill jitter.
-        cam_x_raw = (self.tel1["X"].values + self.tel2["X"].values) / 2
-        cam_y_raw = (self.tel1["Y"].values + self.tel2["Y"].values) / 2
+        # Midpoint of both cars' real positions at each d1 time step.
+        cam_x_raw = (self.tel1["X"].values + self.tel2["X"].values[d2_at_t1]) / 2
+        cam_y_raw = (self.tel1["Y"].values + self.tel2["Y"].values[d2_at_t1]) / 2
         self._cam_x = _rolling_mean(cam_x_raw, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y_raw, _CAM_SMOOTH_WINDOW)
 
@@ -195,31 +209,26 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
-        idx = int(progress * (len(self.tel1) - 1))
+        idx1 = int(progress * (len(self.tel1) - 1))
+        idx2 = int(self._d2_idx[idx1])
 
-        x1, y1 = self.tel1["X"].iloc[idx], self.tel1["Y"].iloc[idx]
-        x2, y2 = self.tel2["X"].iloc[idx], self.tel2["Y"].iloc[idx]
+        x1, y1 = self.tel1["X"].iloc[idx1], self.tel1["Y"].iloc[idx1]
+        x2, y2 = self.tel2["X"].iloc[idx2], self.tel2["Y"].iloc[idx2]
 
-        self._pan_to(self._cam_x[idx], self._cam_y[idx])
+        self._pan_to(self._cam_x[idx1], self._cam_y[idx1])
 
         label_dy = self._viewport_r * 0.10
-        delta = self._delta[idx]
-        d1_ahead = delta >= 0   # positive → d2 slower so far → d1 leads
 
-        if d1_ahead:
-            self._halo2.set_zorder(4)
-            self._dot2.set_zorder(5)
-            self._lbl2.set_zorder(6)
-            self._halo1.set_zorder(8)
-            self._dot1.set_zorder(9)
-            self._lbl1.set_zorder(10)
-        else:
-            self._halo1.set_zorder(4)
-            self._dot1.set_zorder(5)
-            self._lbl1.set_zorder(6)
-            self._halo2.set_zorder(8)
-            self._dot2.set_zorder(9)
-            self._lbl2.set_zorder(10)
+        # Whoever is physically further along the track goes on top
+        d1_ahead = (self.tel1["NormDist"].iloc[idx1]
+                    >= self.tel2["NormDist"].iloc[idx2])
+        front, back = (self.d1, 1) if d1_ahead else (self.d2, 2)
+        for z, artists in [(4, [self._halo2, self._dot2, self._lbl2]),
+                           (8, [self._halo1, self._dot1, self._lbl1])] if d1_ahead else \
+                          [(4, [self._halo1, self._dot1, self._lbl1]),
+                           (8, [self._halo2, self._dot2, self._lbl2])]:
+            for i, a in enumerate(artists):
+                a.set_zorder(z + i)
 
         for halo, dot, lbl, x, y in (
             (self._halo1, self._dot1, self._lbl1, x1, y1),
@@ -229,11 +238,12 @@ class QualifyingMap(Visualization):
             dot.set_data([x], [y])
             lbl.set_position((x, y + label_dy))
 
-        self._mini_dot1.set_data([self._orig1_x[idx]], [self._orig1_y[idx]])
-        self._mini_dot2.set_data([self._orig2_x[idx]], [self._orig2_y[idx]])
+        # Mini-map: real positions for each car
+        self._mini_dot1.set_data([self._orig1_x[idx1]], [self._orig1_y[idx1]])
+        self._mini_dot2.set_data([self._orig2_x[idx2]], [self._orig2_y[idx2]])
 
         self._draw_top()
-        self._draw_bottom(idx, progress, delta)
+        self._draw_bottom(idx1, idx2, progress)
 
     def _draw_top(self) -> None:
         ax = self._ax_top
@@ -248,7 +258,7 @@ class QualifyingMap(Visualization):
         ax.text(0.5, 0.28, "TOP 2  ·  Q LAP COMPARISON", color=_TEXT_DIM,
                 fontsize=9, ha="center", va="center", fontfamily="monospace")
 
-    def _draw_bottom(self, idx: int, progress: float, delta: float) -> None:
+    def _draw_bottom(self, idx1: int, idx2: int, progress: float) -> None:
         ax = self._ax_bot
         ax.cla()
         ax.set_facecolor(_BG)
@@ -256,8 +266,9 @@ class QualifyingMap(Visualization):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
 
-        s1 = self.tel1["Speed"].iloc[idx]
-        s2 = self.tel2["Speed"].iloc[idx]
+        delta = self._delta[idx1]
+        s1 = self.tel1["Speed"].iloc[idx1]
+        s2 = self.tel2["Speed"].iloc[idx2]
         speed_ms = ((s1 + s2) / 2) / 3.6
         secs = abs(delta)
         metres = secs * speed_ms
