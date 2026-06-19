@@ -112,8 +112,12 @@ class QualifyingMap(Visualization):
         t1 = self.tel1["TimeS"].values
         t2 = self.tel2["TimeS"].values
 
-        # For each d1 time step, find d2's telemetry index at the same time
-        d2_at_t1 = np.searchsorted(t2, t1, side="left").clip(0, len(t2) - 1)
+        # For each d1 time step, find d2's telemetry index at the same time.
+        # Force t2 monotonic first, then also force the resulting index array
+        # monotonic so d2's dot can never jump backwards on the track.
+        t2_mono = np.maximum.accumulate(t2)
+        d2_at_t1 = np.searchsorted(t2_mono, t1, side="left").clip(0, len(t2) - 1)
+        d2_at_t1 = np.maximum.accumulate(d2_at_t1)  # belt-and-suspenders
         self._d2_idx = d2_at_t1
 
         # Gap trace: at each track position (d1's NormDist), seconds d2 is behind
