@@ -12,7 +12,7 @@ def get_pole_laps(session, n: int = 2) -> list[tuple]:
     results = session.results.sort_values("Position").head(n)
     pairs = []
     for _, row in results.iterrows():
-        driver_laps = session.laps.pick_driver(row["Abbreviation"])
+        driver_laps = session.laps.pick_drivers(row["Abbreviation"])
         if len(driver_laps) == 0:
             continue
         fastest = driver_laps.pick_fastest()
@@ -46,6 +46,31 @@ def _interpolate_to_grid(tel_df: pd.DataFrame, n_points: int = N_POINTS) -> pd.D
 
 
 def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
-    """Return telemetry for a lap interpolated to n_points along track distance."""
-    tel = lap.get_telemetry().add_distance()
-    return _interpolate_to_grid(tel, n_points)
+    """
+    Return telemetry interpolated to n_points evenly spaced along GPS arc length.
+    Arc length (not odometry Distance) is used so dots move at visually constant speed.
+    """
+    tel = lap.get_telemetry().dropna(subset=["X", "Y", "Speed"]).reset_index(drop=True)
+
+    x = tel["X"].values
+    y = tel["Y"].values
+    time_s = tel["Time"].dt.total_seconds().values
+    speed = tel["Speed"].values
+
+    # Arc length from GPS positions — this is what drives visual speed, not odometry
+    dx = np.diff(x, prepend=x[0])
+    dy = np.diff(y, prepend=y[0])
+    arc = np.cumsum(np.sqrt(dx**2 + dy**2))
+
+    arc_max = arc[-1]
+    grid = np.linspace(0, arc_max, n_points)
+
+    return pd.DataFrame(
+        {
+            "X": np.interp(grid, arc, x),
+            "Y": np.interp(grid, arc, y),
+            "Speed": np.interp(grid, arc, speed),
+            "TimeS": np.interp(grid, arc, time_s),
+            "NormDist": grid / arc_max,
+        }
+    )

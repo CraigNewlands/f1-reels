@@ -2,6 +2,7 @@ import fastf1
 
 from f1reels.config import CACHE_DIR
 
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 fastf1.Cache.enable_cache(str(CACHE_DIR))
 
 

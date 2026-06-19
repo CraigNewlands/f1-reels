@@ -37,7 +37,11 @@ class Renderer:
         rendered = [0]
 
         def animate(frame: int):
-            viz.draw_frame(fig, frame, self.total_frames)
+            try:
+                viz.draw_frame(fig, frame, self.total_frames)
+            except Exception as exc:
+                print(f"\n[frame {frame}] draw_frame error: {exc}", file=sys.stderr)
+                raise
             rendered[0] += 1
             pct = rendered[0] / self.total_frames * 100
             msg = f"\r  Rendering {pct:5.1f}%  ({rendered[0]}/{self.total_frames} frames)"
