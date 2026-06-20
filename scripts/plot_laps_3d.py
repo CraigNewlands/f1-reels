@@ -27,16 +27,31 @@ for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
     pane.set_edgecolor("#333333")
 
 laps_data = []
-for i, (row, lap) in enumerate(pairs):
+# Build both tracks first so we can compute the centroid offset
+raw_tracks = []
+for row, lap in pairs:
+    tel = build_telemetry(lap)
+    raw_tracks.append((row, lap, tel))
+
+# Centroid alignment: both drivers drove the same circuit so their GPS
+# centroids should match. Any difference is a systematic offset between
+# the two cars' GPS receivers.
+cx1, cy1 = raw_tracks[0][2]["X"].mean(), raw_tracks[0][2]["Y"].mean()
+cx2, cy2 = raw_tracks[1][2]["X"].mean(), raw_tracks[1][2]["Y"].mean()
+dx, dy = cx1 - cx2, cy1 - cy2
+print(f"GPS centroid offset → d2 shifted by ({dx:.1f}, {dy:.1f}) m")
+
+# Apply offset to d2's track
+raw_tracks[1][2]["X"] += dx
+raw_tracks[1][2]["Y"] += dy
+
+for i, (row, lap, tel) in enumerate(raw_tracks):
     abbr  = row["Abbreviation"]
     color = driver_color(abbr, row.get("TeamName", ""))
     lt    = lap["LapTime"]
     lw    = 1.5 if i == 0 else 1.0
     label = f"{abbr}  {lt}"
-
-    # Use build_telemetry so we see exactly what the visualisation pipeline uses
-    tel = build_telemetry(lap)
-    z   = [0] * len(tel)
+    z     = [0] * len(tel)
 
     ax.plot(tel["X"].values, tel["Y"].values, z,
             color=color, linewidth=lw, alpha=0.9, label=label)

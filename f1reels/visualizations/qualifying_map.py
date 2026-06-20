@@ -1,6 +1,7 @@
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from f1reels.colors import driver_color
 from f1reels.data.telemetry import build_telemetry, get_pole_laps
@@ -100,9 +101,6 @@ class QualifyingMap(Visualization):
         self.tel2 = build_telemetry(lap2)
 
         # Guarantee d1 is always the faster driver regardless of API ordering.
-        # Use the official LapTime from the lap object (beacon-to-beacon) rather
-        # than the telemetry-derived duration, which starts at the first GPS sample
-        # (offset from the true start line) and can differ by ~0.1-0.3 s per driver.
         lt1 = lap1["LapTime"].total_seconds()
         lt2 = lap2["LapTime"].total_seconds()
         if lt1 > lt2:
@@ -110,12 +108,45 @@ class QualifyingMap(Visualization):
             self.tel1, self.tel2 = self.tel2, self.tel1
             lt1, lt2 = lt2, lt1
 
-        # Official beacon-to-beacon lap durations — used for the animation ratio
-        # so that both cars finish at exactly the same animation frame.
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
-        # Mini-map uses original (pre-perspective) coordinates
+        # ── GPS alignment ────────────────────────────────────────────────
+        # Step 1: centroid alignment — corrects the small systematic GPS
+        # receiver offset between the two cars (~10 m for Bahrain 2025).
+        dx_c = self.tel1["X"].mean() - self.tel2["X"].mean()
+        dy_c = self.tel1["Y"].mean() - self.tel2["Y"].mean()
+        self.tel2 = self.tel2.copy()
+        self.tel2["X"] += dx_c
+        self.tel2["Y"] += dy_c
+
+        # Step 2: phase alignment — only if the nearest start-line point is
+        # within the first quarter of d2's lap.  If k > N/4 the nearest point
+        # is near the END of d2's lap; rolling would create a visible jump in
+        # the dot path, so we skip it and fall back to d1's track for d2.
+        d1_x0, d1_y0 = self.tel1["X"].iloc[0], self.tel1["Y"].iloc[0]
+        d2_dists = np.sqrt((self.tel2["X"].values - d1_x0) ** 2 +
+                           (self.tel2["Y"].values - d1_y0) ** 2)
+        k = int(np.argmin(d2_dists))
+        self._phase_aligned = (0 < k <= len(self.tel2) // 4)
+        if self._phase_aligned:
+            n = len(self.tel2)
+            t = self.tel2["TimeS"].values
+            t_shift = t[k]
+            dt_step = t[-1] - t[-2] if n > 1 else 0.0
+            new_t = np.concatenate([
+                t[k:] - t_shift,
+                t[:k] + (t[-1] - t_shift + dt_step),
+            ])
+            self.tel2 = pd.DataFrame({
+                "X":       np.roll(self.tel2["X"].values, -k),
+                "Y":       np.roll(self.tel2["Y"].values, -k),
+                "Speed":   np.roll(self.tel2["Speed"].values, -k),
+                "TimeS":   new_t,
+                "NormDist": np.linspace(0, 1, n),
+            })
+
+        # Mini-map uses pre-perspective, post-alignment coordinates
         self._orig1_x = self.tel1["X"].values.copy()
         self._orig1_y = self.tel1["Y"].values.copy()
         self._orig2_x = self.tel2["X"].values.copy()
@@ -129,17 +160,14 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Both dots travel along d1's GPS path — this eliminates GPS alignment
-        # issues between drivers entirely.  d1 is at fraction f1, d2 at f2 = f1*(t1/t2).
-        # d2's Speed/TimeS data is still used for the HUD gap display.
+        # Both cars now aligned — use each driver's own GPS track.
         ratio = self._t1_laptime / self._t2_laptime   # < 1 since d1 is faster
         f1_grid = np.linspace(0, 1, _N_CAM)
         f2_grid = f1_grid * ratio
-        # Camera midpoint: both on d1's track so midpoint is also on d1's track
         cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
-                 _frac_interp_array(f2_grid, self.tel1["X"].values)) / 2
+                 _frac_interp_array(f2_grid, self.tel2["X"].values)) / 2
         cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
-                 _frac_interp_array(f2_grid, self.tel1["Y"].values)) / 2
+                 _frac_interp_array(f2_grid, self.tel2["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
         self._lap_ratio = ratio
@@ -239,11 +267,14 @@ class QualifyingMap(Visualization):
         f1 = progress
         f2 = progress * self._lap_ratio
 
-        # Both dots on d1's reference track — d2 just at a slower fraction
         x1 = _frac_interp(f1, self.tel1["X"].values)
         y1 = _frac_interp(f1, self.tel1["Y"].values)
-        x2 = _frac_interp(f2, self.tel1["X"].values)
-        y2 = _frac_interp(f2, self.tel1["Y"].values)
+        # Use d2's own GPS track if phase-aligned; otherwise use d1's reference
+        # track to avoid the visual start-position offset from the data gap.
+        d2_x_src = self.tel2["X"].values if self._phase_aligned else self.tel1["X"].values
+        d2_y_src = self.tel2["Y"].values if self._phase_aligned else self.tel1["Y"].values
+        x2 = _frac_interp(f2, d2_x_src)
+        y2 = _frac_interp(f2, d2_y_src)
 
         cam_idx = int(progress * (_N_CAM - 1))
         self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
@@ -263,9 +294,11 @@ class QualifyingMap(Visualization):
             [_frac_interp(f1, self._orig1_x)],
             [_frac_interp(f1, self._orig1_y)],
         )
+        mini2_x = self._orig2_x if self._phase_aligned else self._orig1_x
+        mini2_y = self._orig2_y if self._phase_aligned else self._orig1_y
         self._mini_dot2.set_data(
-            [_frac_interp(f2, self._orig1_x)],
-            [_frac_interp(f2, self._orig1_y)],
+            [_frac_interp(f2, mini2_x)],
+            [_frac_interp(f2, mini2_y)],
         )
 
         idx = int(f1 * (len(self._delta) - 1))
