@@ -129,16 +129,17 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Pre-compute smoothed camera path.
-        # f1 advances linearly 0→1 over the animation; f2 advances more slowly
-        # because d2 took longer, so d2 is always behind d1 on track.
+        # Both dots travel along d1's GPS path — this eliminates GPS alignment
+        # issues between drivers entirely.  d1 is at fraction f1, d2 at f2 = f1*(t1/t2).
+        # d2's Speed/TimeS data is still used for the HUD gap display.
         ratio = self._t1_laptime / self._t2_laptime   # < 1 since d1 is faster
         f1_grid = np.linspace(0, 1, _N_CAM)
         f2_grid = f1_grid * ratio
+        # Camera midpoint: both on d1's track so midpoint is also on d1's track
         cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
-                 _frac_interp_array(f2_grid, self.tel2["X"].values)) / 2
+                 _frac_interp_array(f2_grid, self.tel1["X"].values)) / 2
         cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
-                 _frac_interp_array(f2_grid, self.tel2["Y"].values)) / 2
+                 _frac_interp_array(f2_grid, self.tel1["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
         self._lap_ratio = ratio
@@ -238,10 +239,11 @@ class QualifyingMap(Visualization):
         f1 = progress
         f2 = progress * self._lap_ratio
 
+        # Both dots on d1's reference track — d2 just at a slower fraction
         x1 = _frac_interp(f1, self.tel1["X"].values)
         y1 = _frac_interp(f1, self.tel1["Y"].values)
-        x2 = _frac_interp(f2, self.tel2["X"].values)
-        y2 = _frac_interp(f2, self.tel2["Y"].values)
+        x2 = _frac_interp(f2, self.tel1["X"].values)
+        y2 = _frac_interp(f2, self.tel1["Y"].values)
 
         cam_idx = int(progress * (_N_CAM - 1))
         self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
@@ -262,8 +264,8 @@ class QualifyingMap(Visualization):
             [_frac_interp(f1, self._orig1_y)],
         )
         self._mini_dot2.set_data(
-            [_frac_interp(f2, self._orig2_x)],
-            [_frac_interp(f2, self._orig2_y)],
+            [_frac_interp(f2, self._orig1_x)],
+            [_frac_interp(f2, self._orig1_y)],
         )
 
         idx = int(f1 * (len(self._delta) - 1))
