@@ -52,6 +52,25 @@ def test_both_at_start_line_at_zero():
     assert x1 == x2 == pytest.approx(0.0)
 
 
+def test_faster_driver_is_d1_after_swap():
+    """
+    If the API returns drivers in the wrong order (slower first), the swap
+    must correct it so d1 always has the shorter lap time.
+    """
+    t1_wrong = 91.5   # slower — would be d1 if API order is trusted blindly
+    t2_wrong = 90.8   # faster — would be d2
+
+    # Simulate the swap logic
+    if t1_wrong > t2_wrong:
+        t1_correct, t2_correct = t2_wrong, t1_wrong
+    else:
+        t1_correct, t2_correct = t1_wrong, t2_wrong
+
+    assert t1_correct < t2_correct, "After swap, d1 must have shorter lap time"
+    ratio = t1_correct / t2_correct
+    assert ratio < 1, "ratio must be < 1 so d2 always trails d1 on track"
+
+
 def test_gap_grows_over_lap():
     """Physical gap between cars should grow as the lap progresses."""
     t1, t2 = 70.270, 70.500

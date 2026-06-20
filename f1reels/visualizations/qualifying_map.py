@@ -99,7 +99,13 @@ class QualifyingMap(Visualization):
         self.tel1 = build_telemetry(lap1)
         self.tel2 = build_telemetry(lap2)
 
-        # Lap times from arc-length telemetry (lap-relative, starts at 0)
+        # Guarantee d1 is always the faster driver regardless of API ordering.
+        # get_pole_laps sorts by Position which can be unreliable; lap times
+        # from the telemetry are ground truth.
+        if self.tel1["TimeS"].values[-1] > self.tel2["TimeS"].values[-1]:
+            self.d1, self.d2 = self.d2, self.d1
+            self.tel1, self.tel2 = self.tel2, self.tel1
+
         self._t1_laptime = float(self.tel1["TimeS"].values[-1])
         self._t2_laptime = float(self.tel2["TimeS"].values[-1])
 
