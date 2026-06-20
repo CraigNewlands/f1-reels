@@ -100,14 +100,20 @@ class QualifyingMap(Visualization):
         self.tel2 = build_telemetry(lap2)
 
         # Guarantee d1 is always the faster driver regardless of API ordering.
-        # get_pole_laps sorts by Position which can be unreliable; lap times
-        # from the telemetry are ground truth.
-        if self.tel1["TimeS"].values[-1] > self.tel2["TimeS"].values[-1]:
+        # Use the official LapTime from the lap object (beacon-to-beacon) rather
+        # than the telemetry-derived duration, which starts at the first GPS sample
+        # (offset from the true start line) and can differ by ~0.1-0.3 s per driver.
+        lt1 = lap1["LapTime"].total_seconds()
+        lt2 = lap2["LapTime"].total_seconds()
+        if lt1 > lt2:
             self.d1, self.d2 = self.d2, self.d1
             self.tel1, self.tel2 = self.tel2, self.tel1
+            lt1, lt2 = lt2, lt1
 
-        self._t1_laptime = float(self.tel1["TimeS"].values[-1])
-        self._t2_laptime = float(self.tel2["TimeS"].values[-1])
+        # Official beacon-to-beacon lap durations — used for the animation ratio
+        # so that both cars finish at exactly the same animation frame.
+        self._t1_laptime = lt1
+        self._t2_laptime = lt2
 
         # Mini-map uses original (pre-perspective) coordinates
         self._orig1_x = self.tel1["X"].values.copy()
@@ -137,8 +143,17 @@ class QualifyingMap(Visualization):
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
         self._lap_ratio = ratio
 
-        # Delta trace: seconds d2 is behind at each arc-length position
-        self._delta = self.tel2["TimeS"].values - self.tel1["TimeS"].values
+        # Delta trace: for each NormDist position along d1's path, how many seconds
+        # is d2 behind?  We must evaluate d2's time at the same normalized distance
+        # rather than the same array index, because the arrays may not share a common
+        # physical starting point before the extrapolation fix is fully propagated.
+        norm_grid = np.linspace(0, 1, len(self.tel1))
+        t2_at_d1_pos = np.interp(
+            norm_grid,
+            np.linspace(0, 1, len(self.tel2)),
+            self.tel2["TimeS"].values,
+        )
+        self._delta = t2_at_d1_pos - self.tel1["TimeS"].values
 
         x = self.tel1["X"].values
         y = self.tel1["Y"].values

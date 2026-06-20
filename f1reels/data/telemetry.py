@@ -58,6 +58,10 @@ def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
     """
     Return telemetry interpolated to n_points evenly spaced along GPS arc length.
     Arc length (not odometry Distance) is used so dots move at visually constant speed.
+
+    The first row is extrapolated back to the true lap-start time (T=0 relative to
+    the lap-start crossing) so that NormDist=0 corresponds to the same physical
+    location for every driver, regardless of GPS sampling phase at the lap boundary.
     """
     tel = lap.get_telemetry().dropna(subset=["X", "Y", "Speed"]).reset_index(drop=True)
 
@@ -65,9 +69,12 @@ def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
     y = tel["Y"].values
     speed = tel["Speed"].values
 
-    # Normalize to lap-relative time (FastF1 Time is session-absolute)
-    time_s = tel["Time"].dt.total_seconds().values
-    time_s = time_s - time_s[0]
+    # Normalize to lap-relative time.
+    # FastF1 Time is session-absolute; subtracting LapStartTime (the beacon crossing)
+    # gives the true elapsed time within the lap.  The first raw GPS sample may be
+    # several hundred milliseconds AFTER the beacon crossing, so time_s[0] > 0.
+    lap_start_s = lap["LapStartTime"].total_seconds()
+    time_s = tel["Time"].dt.total_seconds().values - lap_start_s
     # Guard against any tiny backwards glitches in the raw time channel
     time_s = np.maximum.accumulate(time_s)
 
@@ -75,6 +82,27 @@ def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
     # that would otherwise cause jumpy dot motion
     x = _smooth1d(x, window=9)
     y = _smooth1d(y, window=9)
+
+    # Prepend a synthetic T=0 row by linear extrapolation from the first two GPS
+    # samples.  This anchors NormDist=0 to the true start/finish crossing rather
+    # than to whichever GPS sample happened to fall first after the beacon event.
+    # If the first sample is already at T≈0 (within 20 ms) skip extrapolation to
+    # avoid amplifying any noise in the first GPS reading.
+    _T0_THRESHOLD = 0.02  # seconds — GPS at 10 Hz → max 100 ms gap
+    if time_s[0] > _T0_THRESHOLD and len(x) >= 2:
+        dt10 = time_s[1] - time_s[0]  # time between first two samples
+        if dt10 > 0:
+            # linear back-extrapolation: position at t=0
+            frac = time_s[0] / dt10
+            x0 = x[0] - frac * (x[1] - x[0])
+            y0 = y[0] - frac * (y[1] - y[0])
+            s0 = speed[0]  # carry the first known speed
+        else:
+            x0, y0, s0 = x[0], y[0], speed[0]
+        x = np.concatenate([[x0], x])
+        y = np.concatenate([[y0], y])
+        speed = np.concatenate([[s0], speed])
+        time_s = np.concatenate([[0.0], time_s])
 
     dx = np.diff(x, prepend=x[0])
     dy = np.diff(y, prepend=y[0])
