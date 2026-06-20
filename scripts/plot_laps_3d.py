@@ -37,19 +37,27 @@ for row, lap in pairs:
 # Centroid alignment: both drivers drove the same circuit so their GPS
 # centroids should match. Any difference is a systematic offset between
 # the two cars' GPS receivers.
-# GPS drift correction: shift d2's entire track so its Distance=0 position
-# aligns with d1's.  Both cars physically crossed the same timing loop, so
-# any coordinate difference at Distance=0 is GPS receiver drift, not real.
+# GPS drift correction — longitudinal component only (vector projection).
+# Both cars crossed the same timing loop; any coordinate gap at Distance=0
+# is receiver drift.  We project the drift onto the track direction vector
+# and shift d2 only along-track, preserving the lateral racing-line offset.
 t1_ref, t2_ref = raw_tracks[0][2], raw_tracks[1][2]
 norm1, norm2 = t1_ref["NormDist"].values, t2_ref["NormDist"].values
-d1_x0 = float(np.interp(0, norm1, t1_ref["X"].values))
-d1_y0 = float(np.interp(0, norm1, t1_ref["Y"].values))
-d2_x0 = float(np.interp(0, norm2, t2_ref["X"].values))
-d2_y0 = float(np.interp(0, norm2, t2_ref["Y"].values))
-dx, dy = d1_x0 - d2_x0, d1_y0 - d2_y0
-print(f"GPS drift correction → d2 shifted by ({dx:.1f}, {dy:.1f}) m")
-raw_tracks[1][2]["X"] += dx
-raw_tracks[1][2]["Y"] += dy
+d1_x0  = float(np.interp(0,     norm1, t1_ref["X"].values))
+d1_y0  = float(np.interp(0,     norm1, t1_ref["Y"].values))
+d2_x0  = float(np.interp(0,     norm2, t2_ref["X"].values))
+d2_y0  = float(np.interp(0,     norm2, t2_ref["Y"].values))
+d1_xah = float(np.interp(0.002, norm1, t1_ref["X"].values))
+d1_yah = float(np.interp(0.002, norm1, t1_ref["Y"].values))
+tvx, tvy = d1_xah - d1_x0, d1_yah - d1_y0
+mag = np.hypot(tvx, tvy)
+if mag > 0: tvx /= mag; tvy /= mag
+diff_x, diff_y = d1_x0 - d2_x0, d1_y0 - d2_y0
+lon = diff_x * tvx + diff_y * tvy
+ox, oy = lon * tvx, lon * tvy
+print(f"GPS drift correction (longitudinal only) → ({ox:.1f}, {oy:.1f}) m")
+raw_tracks[1][2]["X"] += ox
+raw_tracks[1][2]["Y"] += oy
 
 for i, (row, lap, tel) in enumerate(raw_tracks):
     abbr  = row["Abbreviation"]

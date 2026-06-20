@@ -110,20 +110,39 @@ class QualifyingMap(Visualization):
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
-        # ── GPS drift correction ─────────────────────────────────────────
-        # Each car's GPS receiver drifts independently.  At Distance=0 both
-        # drivers physically crossed the same timing loop, so any coordinate
-        # difference between them is pure GPS drift, not a real positional gap.
-        # We shift d2's ENTIRE track by that offset so the start lines align.
-        # This preserves the true lateral difference (different racing lines
-        # across the start straight) while removing the longitudinal drift.
-        d1_x0 = float(np.interp(0, self.tel1["NormDist"].values, self.tel1["X"].values))
-        d1_y0 = float(np.interp(0, self.tel1["NormDist"].values, self.tel1["Y"].values))
-        d2_x0 = float(np.interp(0, self.tel2["NormDist"].values, self.tel2["X"].values))
-        d2_y0 = float(np.interp(0, self.tel2["NormDist"].values, self.tel2["Y"].values))
+        # ── GPS drift correction (longitudinal only) ─────────────────────
+        # Both cars crossed the same physical timing loop, so any coordinate
+        # difference at Distance=0 is GPS receiver drift.  We correct only the
+        # longitudinal (along-track) component so the start lines align, while
+        # preserving the true lateral offset from each driver's racing line.
+        #
+        # Method: project the drift vector onto the track's unit direction
+        # vector at the start line (vector projection / dot product).
+
+        # Start positions at Distance=0 for both drivers
+        n1 = self.tel1["NormDist"].values
+        n2 = self.tel2["NormDist"].values
+        d1_x0 = float(np.interp(0, n1, self.tel1["X"].values))
+        d1_y0 = float(np.interp(0, n1, self.tel1["Y"].values))
+        d2_x0 = float(np.interp(0, n2, self.tel2["X"].values))
+        d2_y0 = float(np.interp(0, n2, self.tel2["Y"].values))
+
+        # Track direction unit vector at the start line (use d1, ~10 m ahead)
+        d1_x_ahead = float(np.interp(0.002, n1, self.tel1["X"].values))
+        d1_y_ahead = float(np.interp(0.002, n1, self.tel1["Y"].values))
+        tvx = d1_x_ahead - d1_x0
+        tvy = d1_y_ahead - d1_y0
+        mag = np.hypot(tvx, tvy)
+        if mag > 0:
+            tvx /= mag
+            tvy /= mag
+
+        # Longitudinal component of the drift (dot product onto track direction)
+        diff_x, diff_y = d1_x0 - d2_x0, d1_y0 - d2_y0
+        lon = diff_x * tvx + diff_y * tvy
         self.tel2 = self.tel2.copy()
-        self.tel2["X"] += d1_x0 - d2_x0
-        self.tel2["Y"] += d1_y0 - d2_y0
+        self.tel2["X"] += lon * tvx
+        self.tel2["Y"] += lon * tvy
 
         # ── Common distance reference for delta ──────────────────────────
         # Interpolate d2's time onto d1's normalized distance so the delta
