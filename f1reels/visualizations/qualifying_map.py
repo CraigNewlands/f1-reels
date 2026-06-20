@@ -110,75 +110,49 @@ class QualifyingMap(Visualization):
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
-        # ── GPS drift correction (longitudinal only) ─────────────────────
-        # Both cars crossed the same physical timing loop, so any coordinate
-        # difference at Distance=0 is GPS receiver drift.  We correct only the
-        # longitudinal (along-track) component so the start lines align, while
-        # preserving the true lateral offset from each driver's racing line.
-        #
-        # Method: project the drift vector onto the track's unit direction
-        # vector at the start line (vector projection / dot product).
+        # ── Single rail: use d1's GPS track for both dot positions ──────
+        # GPS drift between two independent receivers (1–2 m inherent in civil
+        # GPS) makes it impossible to reliably align two separate racing lines
+        # at the start/finish crossing.  The industry-standard solution for
+        # animation is to use d1's track as the master "rail" and project both
+        # drivers onto it via their distance covered — GPS drift disappears,
+        # both dots start at the exact same pixel, and whoever covers more
+        # distance at time T appears physically ahead.
 
-        # Start positions at Distance=0 for both drivers
+        # Delta: at each NormDist position along d1's path, how many seconds
+        # is d2 behind?  Interpolate d2's time onto d1's distance grid.
         n1 = self.tel1["NormDist"].values
-        n2 = self.tel2["NormDist"].values
-        d1_x0 = float(np.interp(0, n1, self.tel1["X"].values))
-        d1_y0 = float(np.interp(0, n1, self.tel1["Y"].values))
-        d2_x0 = float(np.interp(0, n2, self.tel2["X"].values))
-        d2_y0 = float(np.interp(0, n2, self.tel2["Y"].values))
-
-        # Track direction unit vector at the start line (use d1, ~10 m ahead)
-        d1_x_ahead = float(np.interp(0.002, n1, self.tel1["X"].values))
-        d1_y_ahead = float(np.interp(0.002, n1, self.tel1["Y"].values))
-        tvx = d1_x_ahead - d1_x0
-        tvy = d1_y_ahead - d1_y0
-        mag = np.hypot(tvx, tvy)
-        if mag > 0:
-            tvx /= mag
-            tvy /= mag
-
-        # Longitudinal component of the drift (dot product onto track direction)
-        diff_x, diff_y = d1_x0 - d2_x0, d1_y0 - d2_y0
-        lon = diff_x * tvx + diff_y * tvy
-        self.tel2 = self.tel2.copy()
-        self.tel2["X"] += lon * tvx
-        self.tel2["Y"] += lon * tvy
-
-        # ── Common distance reference for delta ──────────────────────────
-        # Interpolate d2's time onto d1's normalized distance so the delta
-        # at each track position reflects who is faster in that sector.
-        # X/Y are NOT interpolated across drivers — each driver keeps their
-        # own racing line; only the drift offset above is applied.
-        d1_norm = self.tel1["NormDist"].values
-        t2_at_d1 = np.interp(d1_norm,
+        t2_at_d1 = np.interp(n1,
                              self.tel2["NormDist"].values,
                              self.tel2["TimeS"].values)
         self._delta = t2_at_d1 - self.tel1["TimeS"].values  # >0 → d2 slower here
 
-        # Mini-map uses pre-perspective coordinates (post drift-correction)
+        # Pre-compute d2's NormDist at each point in the animation timeline
+        # (t = 0 → t1_laptime) so the camera path can be computed correctly.
+        t_grid  = np.linspace(0, lt1, _N_CAM)
+        f1_grid = np.linspace(0, 1, _N_CAM)
+        f2_grid = np.interp(t_grid,
+                            self.tel2["TimeS"].values,
+                            self.tel2["NormDist"].values)
+        self._t2_timelookup = self.tel2["TimeS"].values   # for draw_frame
+        self._t2_normdist   = self.tel2["NormDist"].values
+
+        # Mini-map uses d1's pre-perspective track for both dots
         self._orig1_x = self.tel1["X"].values.copy()
         self._orig1_y = self.tel1["Y"].values.copy()
-        self._orig2_x = self.tel2["X"].values.copy()
-        self._orig2_y = self.tel2["Y"].values.copy()
 
-        # Apply perspective transform
+        # Apply perspective transform to d1 only (d2 is projected onto d1's rail)
         rotate_deg = _pca_rotation_angle(self.tel1["X"].values, self.tel1["Y"].values)
-        for attr in ("tel1", "tel2"):
-            tel = getattr(self, attr).copy()
-            px, py = _perspective(tel["X"].values, tel["Y"].values, rotate_deg, _TILT)
-            tel["X"], tel["Y"] = px, py
-            setattr(self, attr, tel)
+        tel = self.tel1.copy()
+        px, py = _perspective(tel["X"].values, tel["Y"].values, rotate_deg, _TILT)
+        tel["X"], tel["Y"] = px, py
+        self.tel1 = tel
 
-        # ── Animation camera path ────────────────────────────────────────
-        # Pre-compute smoothed midpoint between both cars' real positions
-        # across the animation timeline (T = 0 → t1_laptime).
-        t1_s   = self.tel1["TimeS"].values
-        t2_s   = self.tel2["TimeS"].values
-        t_grid = np.linspace(0, lt1, _N_CAM)
-        cam_x  = (np.interp(t_grid, t1_s, self.tel1["X"].values) +
-                  np.interp(t_grid, t2_s, self.tel2["X"].values)) / 2
-        cam_y  = (np.interp(t_grid, t1_s, self.tel1["Y"].values) +
-                  np.interp(t_grid, t2_s, self.tel2["Y"].values)) / 2
+        # Camera: midpoint of both dots' positions on d1's rail
+        cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
+                 _frac_interp_array(f2_grid, self.tel1["X"].values)) / 2
+        cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
+                 _frac_interp_array(f2_grid, self.tel1["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
 
@@ -258,16 +232,21 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
-        T = progress * self._t1_laptime   # elapsed time in seconds
+        T = progress * self._t1_laptime
 
-        # Place each car at their real GPS position at time T.
-        # np.interp on the monotonic TimeS arrays gives smooth, jump-free positions.
-        t1 = self.tel1["TimeS"].values
-        t2 = self.tel2["TimeS"].values
-        x1 = float(np.interp(T, t1, self.tel1["X"].values))
-        y1 = float(np.interp(T, t1, self.tel1["Y"].values))
-        x2 = float(np.interp(T, t2, self.tel2["X"].values))
-        y2 = float(np.interp(T, t2, self.tel2["Y"].values))
+        # d1: at NormDist = progress on its own rail (uniform distance progression)
+        f1 = progress
+
+        # d2: at whatever NormDist d2 has reached by time T based on its real
+        # speed profile.  When d2 is faster in a sector it has covered more
+        # distance → higher f2 → dot further along d1's rail → appears ahead.
+        f2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
+
+        # Both dots plotted on d1's perspective-transformed track
+        x1 = _frac_interp(f1, self.tel1["X"].values)
+        y1 = _frac_interp(f1, self.tel1["Y"].values)
+        x2 = _frac_interp(f2, self.tel1["X"].values)
+        y2 = _frac_interp(f2, self.tel1["Y"].values)
 
         cam_idx = int(progress * (_N_CAM - 1))
         self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
@@ -282,16 +261,14 @@ class QualifyingMap(Visualization):
             dot.set_data([x], [y])
             lbl.set_position((x, y + label_dy))
 
-        # Mini-map: original (pre-perspective) coordinates
-        mx1 = float(np.interp(T, t1, self._orig1_x))
-        my1 = float(np.interp(T, t1, self._orig1_y))
-        mx2 = float(np.interp(T, t2, self._orig2_x))
-        my2 = float(np.interp(T, t2, self._orig2_y))
-        self._mini_dot1.set_data([mx1], [my1])
-        self._mini_dot2.set_data([mx2], [my2])
+        # Mini-map: both dots on d1's original (pre-perspective) track
+        self._mini_dot1.set_data([_frac_interp(f1, self._orig1_x)],
+                                  [_frac_interp(f1, self._orig1_y)])
+        self._mini_dot2.set_data([_frac_interp(f2, self._orig1_x)],
+                                  [_frac_interp(f2, self._orig1_y)])
 
-        # Delta: at d1's current normalized distance, how many seconds behind is d2?
-        idx = int(progress * (len(self._delta) - 1))
+        # Delta at d1's current position
+        idx = int(f1 * (len(self._delta) - 1))
         delta = self._delta[idx]
 
         self._draw_top()
