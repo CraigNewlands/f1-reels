@@ -16,8 +16,8 @@ _TEXT_BRIGHT = "#ffffff"
 _TILT = 0.42
 _VIEWPORT_FRAC = 0.22
 _MAP_ASPECT = 1.20
-_CAM_SMOOTH_WINDOW = 40
-_N_CAM = 500        # pre-computed camera path resolution
+_CAM_EMA = 0.10      # camera smoothing: lower = floatier/more lag, higher = stiffer
+_TAIL_LEN = 30       # frames of comet tail per car
 
 
 def _fmt_laptime(td) -> str:
@@ -127,17 +127,7 @@ class QualifyingMap(Visualization):
                              self.tel2["TimeS"].values)
         self._delta = t2_at_d1 - self.tel1["TimeS"].values  # >0 → d2 slower here
 
-        # Pre-compute both drivers' NormDist at each animation time step.
-        # BOTH must use real time→distance interpolation so the faster driver
-        # genuinely appears further along the rail at every moment.
-        t_grid  = np.linspace(0, lt1, _N_CAM)
-        f1_grid = np.interp(t_grid,
-                            self.tel1["TimeS"].values,
-                            self.tel1["NormDist"].values)
-        f2_grid = np.interp(t_grid,
-                            self.tel2["TimeS"].values,
-                            self.tel2["NormDist"].values)
-        # Store for draw_frame
+        # Store time→distance lookup arrays for draw_frame
         self._t1_timelookup = self.tel1["TimeS"].values
         self._t1_normdist   = self.tel1["NormDist"].values
         self._t2_timelookup = self.tel2["TimeS"].values
@@ -147,20 +137,18 @@ class QualifyingMap(Visualization):
         self._orig1_x = self.tel1["X"].values.copy()
         self._orig1_y = self.tel1["Y"].values.copy()
 
-        # Apply perspective transform to d1 only (d2 is projected onto d1's rail)
+        # Apply perspective transform to d1 only (d2 projected onto d1's rail)
         rotate_deg = _pca_rotation_angle(self.tel1["X"].values, self.tel1["Y"].values)
         tel = self.tel1.copy()
         px, py = _perspective(tel["X"].values, tel["Y"].values, rotate_deg, _TILT)
         tel["X"], tel["Y"] = px, py
         self.tel1 = tel
 
-        # Camera: midpoint of both dots' positions on d1's rail
-        cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
-                 _frac_interp_array(f2_grid, self.tel1["X"].values)) / 2
-        cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
-                 _frac_interp_array(f2_grid, self.tel1["Y"].values)) / 2
-        self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
-        self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
+        # Camera start position (seeds the EMA in setup_figure)
+        self._cam_start = (
+            float(self.tel1["X"].iloc[0]),
+            float(self.tel1["Y"].iloc[0]),
+        )
 
         x = self.tel1["X"].values
         y = self.tel1["Y"].values
@@ -183,26 +171,40 @@ class QualifyingMap(Visualization):
             ax.set_facecolor(_BG)
             ax.axis("off")
 
+        # Track: three layers for neon glow effect
         tx, ty = self.tel1["X"], self.tel1["Y"]
-        self._ax_map.plot(tx, ty, color=_TRACK_EDGE, linewidth=22,
+        self._ax_map.plot(tx, ty, color="#0a0a0a", linewidth=24,
                           solid_capstyle="round", zorder=0)
-        self._ax_map.plot(tx, ty, color=_TRACK_ROAD, linewidth=16,
-                          solid_capstyle="round", zorder=1)
+        self._ax_map.plot(tx, ty, color=_TRACK_EDGE, linewidth=14,
+                          solid_capstyle="round", alpha=0.20, zorder=1)
+        self._ax_map.plot(tx, ty, color=_TRACK_EDGE, linewidth=4,
+                          solid_capstyle="round", alpha=0.90, zorder=2)
 
         _lbl_kw = dict(fontsize=9, fontweight="bold", ha="center",
                        va="bottom", fontfamily="monospace")
+        _dot_kw  = dict(markersize=14, markeredgecolor="white", markeredgewidth=1.2)
+        _halo_kw = dict(markersize=30, alpha=0.18)
 
+        # Comet tails (updated each frame)
+        (self._tail2,) = self._ax_map.plot([], [], color=self.d2["color"],
+                                            linewidth=4, alpha=0.45,
+                                            solid_capstyle="round", zorder=3)
+        (self._tail1,) = self._ax_map.plot([], [], color=self.d1["color"],
+                                            linewidth=4, alpha=0.45,
+                                            solid_capstyle="round", zorder=3)
+
+        # Car dots (d2 underneath d1)
         (self._halo2,) = self._ax_map.plot([], [], "o", color=self.d2["color"],
-                                            markersize=19, zorder=4)
+                                            zorder=4, **_halo_kw)
         (self._dot2,)  = self._ax_map.plot([], [], "o", color=self.d2["color"],
-                                            markersize=13, zorder=5)
+                                            zorder=5, **_dot_kw)
         self._lbl2 = self._ax_map.text(0, 0, self.d2["abbr"],
                                         color=self.d2["color"], zorder=6, **_lbl_kw)
 
         (self._halo1,) = self._ax_map.plot([], [], "o", color=self.d1["color"],
-                                            markersize=19, zorder=7)
+                                            zorder=7, **_halo_kw)
         (self._dot1,)  = self._ax_map.plot([], [], "o", color=self.d1["color"],
-                                            markersize=13, zorder=8)
+                                            zorder=8, **_dot_kw)
         self._lbl1 = self._ax_map.text(0, 0, self.d1["abbr"],
                                         color=self.d1["color"], zorder=9, **_lbl_kw)
 
@@ -225,7 +227,13 @@ class QualifyingMap(Visualization):
                                                   color=self.d2["color"], markersize=4, zorder=4)
 
         self._ax_map.set_autoscale_on(False)
-        self._pan_to(self._cam_x[0], self._cam_y[0])
+
+        # EMA camera state — seeded at lap start, updated every frame
+        self._cam_live = list(self._cam_start)
+        # Position history for comet tails
+        self._pos_hist: list[tuple] = []
+
+        self._pan_to(*self._cam_start)
 
     def _pan_to(self, cx: float, cy: float) -> None:
         r = self._viewport_r
@@ -252,10 +260,27 @@ class QualifyingMap(Visualization):
         x2 = _frac_interp(f2, self.tel1["X"].values)
         y2 = _frac_interp(f2, self.tel1["Y"].values)
 
-        cam_idx = int(progress * (_N_CAM - 1))
-        self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
+        # EMA camera — glides toward the midpoint between both dots
+        target_x = (x1 + x2) / 2
+        target_y = (y1 + y2) / 2
+        a = _CAM_EMA
+        self._cam_live[0] += a * (target_x - self._cam_live[0])
+        self._cam_live[1] += a * (target_y - self._cam_live[1])
+        self._pan_to(self._cam_live[0], self._cam_live[1])
 
         label_dy = self._viewport_r * 0.10
+
+        # Comet tails
+        self._pos_hist.append((x1, y1, x2, y2))
+        if len(self._pos_hist) > _TAIL_LEN:
+            self._pos_hist.pop(0)
+        if len(self._pos_hist) > 1:
+            h1x = [p[0] for p in self._pos_hist]
+            h1y = [p[1] for p in self._pos_hist]
+            h2x = [p[2] for p in self._pos_hist]
+            h2y = [p[3] for p in self._pos_hist]
+            self._tail1.set_data(h1x, h1y)
+            self._tail2.set_data(h2x, h2y)
 
         for halo, dot, lbl, x, y in (
             (self._halo1, self._dot1, self._lbl1, x1, y1),
