@@ -1,5 +1,6 @@
 """Quick diagnostic: plot the two fastest qualifying laps in 3D GPS space."""
 import sys
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -36,13 +37,9 @@ for row, lap in pairs:
 # Centroid alignment: both drivers drove the same circuit so their GPS
 # centroids should match. Any difference is a systematic offset between
 # the two cars' GPS receivers.
-# Start-point alignment: shift d2 so it starts at d1's first GPS sample
-t1, t2 = raw_tracks[0][2], raw_tracks[1][2]
-dx = t1["X"].iloc[0] - t2["X"].iloc[0]
-dy = t1["Y"].iloc[0] - t2["Y"].iloc[0]
-print(f"Start-point alignment → d2 shifted by ({dx:.1f}, {dy:.1f}) m")
-raw_tracks[1][2]["X"] += dx
-raw_tracks[1][2]["Y"] += dy
+# No spatial alignment: each driver keeps their own raw GPS racing line.
+# Start dots are found by interpolating each driver's X/Y at Distance=0
+# (the exact timing beacon crossing), not by forcing a shared coordinate.
 
 for i, (row, lap, tel) in enumerate(raw_tracks):
     abbr  = row["Abbreviation"]
@@ -59,9 +56,12 @@ for i, (row, lap, tel) in enumerate(raw_tracks):
 
     ax2.plot(tel["X"].values, tel["Y"].values,
              color=color, linewidth=lw, alpha=0.9, label=label)
-    ax2.scatter([tel["X"].iloc[0]], [tel["Y"].iloc[0]],
-                color=color, s=80, zorder=5,
-                label=f"{abbr} start ({tel['X'].iloc[0]:.0f}, {tel['Y'].iloc[0]:.0f})")
+    # Start dot at Distance=0 via interpolation (not iloc[0] which may be past the beacon)
+    norm = tel["NormDist"].values
+    sx = float(np.interp(0, norm, tel["X"].values))
+    sy = float(np.interp(0, norm, tel["Y"].values))
+    ax2.scatter([sx], [sy], color=color, s=80, zorder=5,
+                label=f"{abbr} start ({sx:.0f}, {sy:.0f})")
     laps_data.append((abbr, color, tel))
 
 ax.set_title(f"{ROUND} {YEAR} Q — 3D GPS", color="white", pad=12)
@@ -90,7 +90,10 @@ if laps_data:
     axins.set_title("start area", color="#888888", fontsize=7, pad=3)
     for abbr, color, tel in laps_data:
         axins.plot(tel["X"].values, tel["Y"].values, color=color, linewidth=1.5)
-        axins.scatter([tel["X"].iloc[0]], [tel["Y"].iloc[0]], color=color, s=50, zorder=5)
+        norm = tel["NormDist"].values
+        sx = float(np.interp(0, norm, tel["X"].values))
+        sy = float(np.interp(0, norm, tel["Y"].values))
+        axins.scatter([sx], [sy], color=color, s=50, zorder=5)
     axins.set_xlim(mx - r, mx + r)
     axins.set_ylim(my - r, my + r)
     axins.tick_params(colors="#666666", labelsize=6)

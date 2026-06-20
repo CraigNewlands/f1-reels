@@ -110,19 +110,12 @@ class QualifyingMap(Visualization):
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
-        # ── GPS start-point alignment ────────────────────────────────────
-        # Both laps start at Distance=0 (timing beacon) but the first GPS sample
-        # may land at a slightly different physical point for each driver.
-        # Shift d2's entire GPS track so its first point matches d1's exactly.
-        # The shift is a constant offset (~75 m for Bahrain = 1.4 % of circuit)
-        # so racing-line differences are preserved throughout the lap.
-        self.tel2 = self.tel2.copy()
-        self.tel2["X"] += self.tel1["X"].iloc[0] - self.tel2["X"].iloc[0]
-        self.tel2["Y"] += self.tel1["Y"].iloc[0] - self.tel2["Y"].iloc[0]
-
         # ── Common distance reference for delta ──────────────────────────
         # Interpolate d2's time onto d1's normalized distance so the delta
         # at each track position reflects who is faster in that sector.
+        # X/Y are intentionally NOT interpolated across drivers — each driver
+        # keeps their own raw GPS racing line. Interpolating X/Y onto another
+        # driver's distance axis would spatially warp the track map.
         d1_norm = self.tel1["NormDist"].values
         t2_at_d1 = np.interp(d1_norm,
                              self.tel2["NormDist"].values,
@@ -143,34 +136,18 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # ── Animation: time-based real positions ─────────────────────────
-        # At progress p, both cars are at elapsed time T = p * t1_laptime.
-        # Each car is at its actual GPS position at time T — so whoever is
-        # faster in a sector appears physically ahead on track, just like
-        # watching a real lap overlay.
-        # Camera: smoothed midpoint of both real positions.
-        t1_s = self.tel1["TimeS"].values
-        t2_s = self.tel2["TimeS"].values
+        # ── Animation camera path ────────────────────────────────────────
+        # Pre-compute smoothed midpoint between both cars' real positions
+        # across the animation timeline (T = 0 → t1_laptime).
+        t1_s   = self.tel1["TimeS"].values
+        t2_s   = self.tel2["TimeS"].values
         t_grid = np.linspace(0, lt1, _N_CAM)
-        cam_x = (np.interp(t_grid, t1_s, self.tel1["X"].values) +
-                 np.interp(t_grid, t2_s, self.tel2["X"].values)) / 2
-        cam_y = (np.interp(t_grid, t1_s, self.tel1["Y"].values) +
-                 np.interp(t_grid, t2_s, self.tel2["Y"].values)) / 2
+        cam_x  = (np.interp(t_grid, t1_s, self.tel1["X"].values) +
+                  np.interp(t_grid, t2_s, self.tel2["X"].values)) / 2
+        cam_y  = (np.interp(t_grid, t1_s, self.tel1["Y"].values) +
+                  np.interp(t_grid, t2_s, self.tel2["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
-        self._t_grid = t_grid
-
-        # Delta trace: for each NormDist position along d1's path, how many seconds
-        # is d2 behind?  We must evaluate d2's time at the same normalized distance
-        # rather than the same array index, because the arrays may not share a common
-        # physical starting point before the extrapolation fix is fully propagated.
-        norm_grid = np.linspace(0, 1, len(self.tel1))
-        t2_at_d1_pos = np.interp(
-            norm_grid,
-            np.linspace(0, 1, len(self.tel2)),
-            self.tel2["TimeS"].values,
-        )
-        self._delta = t2_at_d1_pos - self.tel1["TimeS"].values
 
         x = self.tel1["X"].values
         y = self.tel1["Y"].values
