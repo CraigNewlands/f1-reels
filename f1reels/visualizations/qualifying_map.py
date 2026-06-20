@@ -17,6 +17,7 @@ _TILT = 0.42
 _VIEWPORT_FRAC = 0.22
 _MAP_ASPECT = 1.20
 _CAM_EMA = 0.10      # camera smoothing: lower = floatier/more lag, higher = stiffer
+_DOT_EMA = 0.20      # driver dot smoothing: accumulates sub-pixel moves to avoid freeze-jump
 _TAIL_LEN = 30       # frames of comet tail per car
 
 
@@ -228,8 +229,10 @@ class QualifyingMap(Visualization):
 
         self._ax_map.set_autoscale_on(False)
 
-        # EMA camera state — seeded at lap start, updated every frame
+        # EMA state — seeded at lap start, updated every frame
         self._cam_live = list(self._cam_start)
+        self._f1_live  = 0.0   # smoothed NormDist for d1
+        self._f2_live  = 0.0   # smoothed NormDist for d2
         # Position history for comet tails
         self._pos_hist: list[tuple] = []
 
@@ -248,11 +251,16 @@ class QualifyingMap(Visualization):
         progress = min(frame / max(total_frames - 1, 1), 1.0)
         T = progress * self._t1_laptime
 
-        # Both drivers: actual NormDist covered by time T based on real speed.
-        # d1 (faster overall) will have f1 > f2 for most of the lap, but when
-        # d2 is faster in a sector f2 can temporarily exceed f1 → d2 appears ahead.
-        f1 = float(np.interp(T, self._t1_timelookup, self._t1_normdist))
-        f2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
+        # Target NormDist for each driver at time T (real speed profile)
+        tf1 = float(np.interp(T, self._t1_timelookup, self._t1_normdist))
+        tf2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
+
+        # EMA smoothing on the NormDist values: accumulates sub-pixel motion so
+        # dots glide continuously instead of freezing then jumping (which happens
+        # in slow corners where each frame moves < 1 screen pixel).
+        self._f1_live += _DOT_EMA * (tf1 - self._f1_live)
+        self._f2_live += _DOT_EMA * (tf2 - self._f2_live)
+        f1, f2 = self._f1_live, self._f2_live
 
         # Both dots plotted on d1's perspective-transformed track
         x1 = _frac_interp(f1, self.tel1["X"].values)
