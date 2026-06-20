@@ -110,19 +110,33 @@ class QualifyingMap(Visualization):
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
+        # ── GPS drift correction ─────────────────────────────────────────
+        # Each car's GPS receiver drifts independently.  At Distance=0 both
+        # drivers physically crossed the same timing loop, so any coordinate
+        # difference between them is pure GPS drift, not a real positional gap.
+        # We shift d2's ENTIRE track by that offset so the start lines align.
+        # This preserves the true lateral difference (different racing lines
+        # across the start straight) while removing the longitudinal drift.
+        d1_x0 = float(np.interp(0, self.tel1["NormDist"].values, self.tel1["X"].values))
+        d1_y0 = float(np.interp(0, self.tel1["NormDist"].values, self.tel1["Y"].values))
+        d2_x0 = float(np.interp(0, self.tel2["NormDist"].values, self.tel2["X"].values))
+        d2_y0 = float(np.interp(0, self.tel2["NormDist"].values, self.tel2["Y"].values))
+        self.tel2 = self.tel2.copy()
+        self.tel2["X"] += d1_x0 - d2_x0
+        self.tel2["Y"] += d1_y0 - d2_y0
+
         # ── Common distance reference for delta ──────────────────────────
         # Interpolate d2's time onto d1's normalized distance so the delta
         # at each track position reflects who is faster in that sector.
-        # X/Y are intentionally NOT interpolated across drivers — each driver
-        # keeps their own raw GPS racing line. Interpolating X/Y onto another
-        # driver's distance axis would spatially warp the track map.
+        # X/Y are NOT interpolated across drivers — each driver keeps their
+        # own racing line; only the drift offset above is applied.
         d1_norm = self.tel1["NormDist"].values
         t2_at_d1 = np.interp(d1_norm,
                              self.tel2["NormDist"].values,
                              self.tel2["TimeS"].values)
         self._delta = t2_at_d1 - self.tel1["TimeS"].values  # >0 → d2 slower here
 
-        # Mini-map uses pre-perspective coordinates
+        # Mini-map uses pre-perspective coordinates (post drift-correction)
         self._orig1_x = self.tel1["X"].values.copy()
         self._orig1_y = self.tel1["Y"].values.copy()
         self._orig2_x = self.tel2["X"].values.copy()
