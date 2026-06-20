@@ -127,14 +127,20 @@ class QualifyingMap(Visualization):
                              self.tel2["TimeS"].values)
         self._delta = t2_at_d1 - self.tel1["TimeS"].values  # >0 → d2 slower here
 
-        # Pre-compute d2's NormDist at each point in the animation timeline
-        # (t = 0 → t1_laptime) so the camera path can be computed correctly.
+        # Pre-compute both drivers' NormDist at each animation time step.
+        # BOTH must use real time→distance interpolation so the faster driver
+        # genuinely appears further along the rail at every moment.
         t_grid  = np.linspace(0, lt1, _N_CAM)
-        f1_grid = np.linspace(0, 1, _N_CAM)
+        f1_grid = np.interp(t_grid,
+                            self.tel1["TimeS"].values,
+                            self.tel1["NormDist"].values)
         f2_grid = np.interp(t_grid,
                             self.tel2["TimeS"].values,
                             self.tel2["NormDist"].values)
-        self._t2_timelookup = self.tel2["TimeS"].values   # for draw_frame
+        # Store for draw_frame
+        self._t1_timelookup = self.tel1["TimeS"].values
+        self._t1_normdist   = self.tel1["NormDist"].values
+        self._t2_timelookup = self.tel2["TimeS"].values
         self._t2_normdist   = self.tel2["NormDist"].values
 
         # Mini-map uses d1's pre-perspective track for both dots
@@ -234,12 +240,10 @@ class QualifyingMap(Visualization):
         progress = min(frame / max(total_frames - 1, 1), 1.0)
         T = progress * self._t1_laptime
 
-        # d1: at NormDist = progress on its own rail (uniform distance progression)
-        f1 = progress
-
-        # d2: at whatever NormDist d2 has reached by time T based on its real
-        # speed profile.  When d2 is faster in a sector it has covered more
-        # distance → higher f2 → dot further along d1's rail → appears ahead.
+        # Both drivers: actual NormDist covered by time T based on real speed.
+        # d1 (faster overall) will have f1 > f2 for most of the lap, but when
+        # d2 is faster in a sector f2 can temporarily exceed f1 → d2 appears ahead.
+        f1 = float(np.interp(T, self._t1_timelookup, self._t1_normdist))
         f2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
 
         # Both dots plotted on d1's perspective-transformed track
@@ -267,8 +271,8 @@ class QualifyingMap(Visualization):
         self._mini_dot2.set_data([_frac_interp(f2, self._orig1_x)],
                                   [_frac_interp(f2, self._orig1_y)])
 
-        # Delta at d1's current position
-        idx = int(f1 * (len(self._delta) - 1))
+        # Delta at d1's actual NormDist position
+        idx   = min(int(f1 * (len(self._delta) - 1)), len(self._delta) - 1)
         delta = self._delta[idx]
 
         self._draw_top()
