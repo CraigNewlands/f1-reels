@@ -56,31 +56,39 @@ def _smooth1d(arr: np.ndarray, window: int) -> np.ndarray:
 
 def build_telemetry(lap, n_points: int = N_POINTS) -> pd.DataFrame:
     """
-    Return telemetry for one lap interpolated to n_points evenly spaced in time.
+    Return telemetry interpolated to n_points evenly spaced along odometry Distance.
 
-    get_telemetry() already merges GPS and car data correctly.  We normalise
-    time relative to LapStartTime (beacon crossing) and interpolate onto an
-    even time grid so both drivers share a consistent time axis.
+    get_telemetry().add_distance() gives GPS and wheel-speed-integrated distance
+    in a single consistently-timed DataFrame.  Distance is smoother than GPS
+    arc-length and starts at 0 at the lap start (timing beacon crossing),
+    providing a common physical reference axis for comparing both drivers.
+
+    TimeS is lap-relative (time_s - time_s[0]) so the delta between drivers at
+    the same Distance point correctly reflects sectoral time differences.
     """
-    tel = lap.get_telemetry().dropna(subset=["X", "Y", "Speed"]).reset_index(drop=True)
+    tel = (
+        lap.get_telemetry()
+        .add_distance()
+        .dropna(subset=["X", "Y", "Speed", "Distance"])
+        .reset_index(drop=True)
+    )
 
-    raw_t = tel["Time"].dt.total_seconds().values
-    # Time in get_telemetry() is already lap-relative (starts near 0).
-    # Subtract the first value to guarantee it starts at exactly 0.
-    time_s = np.maximum.accumulate(raw_t - raw_t[0])
-    x = _smooth1d(tel["X"].values, window=5)
-    y = _smooth1d(tel["Y"].values, window=5)
-    speed = tel["Speed"].values
+    raw_t  = tel["Time"].dt.total_seconds().values
+    time_s = np.maximum.accumulate(raw_t - raw_t[0])       # lap-relative
+    dist   = np.maximum.accumulate(tel["Distance"].values)  # monotonic odometry
+    x      = _smooth1d(tel["X"].values, window=5)
+    y      = _smooth1d(tel["Y"].values, window=5)
+    speed  = tel["Speed"].values
 
-    t_max = time_s[-1]
-    grid = np.linspace(0, t_max, n_points)
+    dist_max = dist[-1]
+    grid = np.linspace(0, dist_max, n_points)
 
     return pd.DataFrame(
         {
-            "X": np.interp(grid, time_s, x),
-            "Y": np.interp(grid, time_s, y),
-            "Speed": np.interp(grid, time_s, speed),
-            "TimeS": grid,
-            "NormDist": grid / t_max,
+            "X":        np.interp(grid, dist, x),
+            "Y":        np.interp(grid, dist, y),
+            "Speed":    np.interp(grid, dist, speed),
+            "TimeS":    np.interp(grid, dist, time_s),
+            "NormDist": grid / dist_max,
         }
     )

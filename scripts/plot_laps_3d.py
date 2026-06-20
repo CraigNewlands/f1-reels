@@ -36,12 +36,11 @@ for row, lap in pairs:
 # Centroid alignment: both drivers drove the same circuit so their GPS
 # centroids should match. Any difference is a systematic offset between
 # the two cars' GPS receivers.
-cx1, cy1 = raw_tracks[0][2]["X"].mean(), raw_tracks[0][2]["Y"].mean()
-cx2, cy2 = raw_tracks[1][2]["X"].mean(), raw_tracks[1][2]["Y"].mean()
-dx, dy = cx1 - cx2, cy1 - cy2
-print(f"GPS centroid offset → d2 shifted by ({dx:.1f}, {dy:.1f}) m")
-
-# Apply offset to d2's track
+# Start-point alignment: shift d2 so it starts at d1's first GPS sample
+t1, t2 = raw_tracks[0][2], raw_tracks[1][2]
+dx = t1["X"].iloc[0] - t2["X"].iloc[0]
+dy = t1["Y"].iloc[0] - t2["Y"].iloc[0]
+print(f"Start-point alignment → d2 shifted by ({dx:.1f}, {dy:.1f}) m")
 raw_tracks[1][2]["X"] += dx
 raw_tracks[1][2]["Y"] += dy
 

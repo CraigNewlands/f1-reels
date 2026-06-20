@@ -29,18 +29,23 @@ def _make_mock_lap(lap_start_offset_s: float = 0.05, n_car: int = 500, n_pos: in
     lap_start_s = 3600.0
     lap_time = 90.0
 
-    # Merged telemetry: lap-relative Time (starts at offset, not at 0)
+    # Merged telemetry with Distance — mimics get_telemetry().add_distance()
     t_rel = lap_start_offset_s + np.linspace(0, lap_time - lap_start_offset_s, n_car)
     tel_df = pd.DataFrame({
-        "Time": pd.to_timedelta(t_rel, unit="s"),
-        "X": np.linspace(lap_start_offset_s * 60, 5000.0, n_car),
-        "Y": np.zeros(n_car),
-        "Speed": np.full(n_car, 200.0),
+        "Time":     pd.to_timedelta(t_rel, unit="s"),
+        "X":        np.linspace(lap_start_offset_s * 60, 5000.0, n_car),
+        "Y":        np.zeros(n_car),
+        "Speed":    np.full(n_car, 200.0),
+        "Distance": np.linspace(0.0, 5412.0, n_car),
     })
+
+    class MockTelemetry(pd.DataFrame):
+        def add_distance(self):
+            return MockTelemetry(tel_df.copy())
 
     class MockLap:
         def get_telemetry(self):
-            return tel_df.copy()
+            return MockTelemetry(tel_df.copy())
 
         def __getitem__(self, key):
             if key == "LapStartTime":

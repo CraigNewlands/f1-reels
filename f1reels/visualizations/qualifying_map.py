@@ -1,7 +1,6 @@
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 from f1reels.colors import driver_color
 from f1reels.data.telemetry import build_telemetry, get_pole_laps
@@ -111,48 +110,32 @@ class QualifyingMap(Visualization):
         self._t1_laptime = lt1
         self._t2_laptime = lt2
 
-        # ── GPS alignment ────────────────────────────────────────────────
-        # Step 1: centroid alignment — corrects the small systematic GPS
-        # receiver offset between the two cars (~10 m for Bahrain 2025).
-        dx_c = self.tel1["X"].mean() - self.tel2["X"].mean()
-        dy_c = self.tel1["Y"].mean() - self.tel2["Y"].mean()
+        # ── GPS start-point alignment ────────────────────────────────────
+        # Both laps start at Distance=0 (timing beacon) but the first GPS sample
+        # may land at a slightly different physical point for each driver.
+        # Shift d2's entire GPS track so its first point matches d1's exactly.
+        # The shift is a constant offset (~75 m for Bahrain = 1.4 % of circuit)
+        # so racing-line differences are preserved throughout the lap.
         self.tel2 = self.tel2.copy()
-        self.tel2["X"] += dx_c
-        self.tel2["Y"] += dy_c
+        self.tel2["X"] += self.tel1["X"].iloc[0] - self.tel2["X"].iloc[0]
+        self.tel2["Y"] += self.tel1["Y"].iloc[0] - self.tel2["Y"].iloc[0]
 
-        # Step 2: phase alignment — only if the nearest start-line point is
-        # within the first quarter of d2's lap.  If k > N/4 the nearest point
-        # is near the END of d2's lap; rolling would create a visible jump in
-        # the dot path, so we skip it and fall back to d1's track for d2.
-        d1_x0, d1_y0 = self.tel1["X"].iloc[0], self.tel1["Y"].iloc[0]
-        d2_dists = np.sqrt((self.tel2["X"].values - d1_x0) ** 2 +
-                           (self.tel2["Y"].values - d1_y0) ** 2)
-        k = int(np.argmin(d2_dists))
-        self._phase_aligned = (0 < k <= len(self.tel2) // 4)
-        if self._phase_aligned:
-            n = len(self.tel2)
-            t = self.tel2["TimeS"].values
-            t_shift = t[k]
-            dt_step = t[-1] - t[-2] if n > 1 else 0.0
-            new_t = np.concatenate([
-                t[k:] - t_shift,
-                t[:k] + (t[-1] - t_shift + dt_step),
-            ])
-            self.tel2 = pd.DataFrame({
-                "X":       np.roll(self.tel2["X"].values, -k),
-                "Y":       np.roll(self.tel2["Y"].values, -k),
-                "Speed":   np.roll(self.tel2["Speed"].values, -k),
-                "TimeS":   new_t,
-                "NormDist": np.linspace(0, 1, n),
-            })
+        # ── Common distance reference for delta ──────────────────────────
+        # Interpolate d2's time onto d1's normalized distance so the delta
+        # at each track position reflects who is faster in that sector.
+        d1_norm = self.tel1["NormDist"].values
+        t2_at_d1 = np.interp(d1_norm,
+                             self.tel2["NormDist"].values,
+                             self.tel2["TimeS"].values)
+        self._delta = t2_at_d1 - self.tel1["TimeS"].values  # >0 → d2 slower here
 
-        # Mini-map uses pre-perspective, post-alignment coordinates
+        # Mini-map uses pre-perspective coordinates
         self._orig1_x = self.tel1["X"].values.copy()
         self._orig1_y = self.tel1["Y"].values.copy()
         self._orig2_x = self.tel2["X"].values.copy()
         self._orig2_y = self.tel2["Y"].values.copy()
 
-        # Apply perspective transform to both telemetry sets
+        # Apply perspective transform
         rotate_deg = _pca_rotation_angle(self.tel1["X"].values, self.tel1["Y"].values)
         for attr in ("tel1", "tel2"):
             tel = getattr(self, attr).copy()
@@ -160,17 +143,22 @@ class QualifyingMap(Visualization):
             tel["X"], tel["Y"] = px, py
             setattr(self, attr, tel)
 
-        # Both cars now aligned — use each driver's own GPS track.
-        ratio = self._t1_laptime / self._t2_laptime   # < 1 since d1 is faster
-        f1_grid = np.linspace(0, 1, _N_CAM)
-        f2_grid = f1_grid * ratio
-        cam_x = (_frac_interp_array(f1_grid, self.tel1["X"].values) +
-                 _frac_interp_array(f2_grid, self.tel2["X"].values)) / 2
-        cam_y = (_frac_interp_array(f1_grid, self.tel1["Y"].values) +
-                 _frac_interp_array(f2_grid, self.tel2["Y"].values)) / 2
+        # ── Animation: time-based real positions ─────────────────────────
+        # At progress p, both cars are at elapsed time T = p * t1_laptime.
+        # Each car is at its actual GPS position at time T — so whoever is
+        # faster in a sector appears physically ahead on track, just like
+        # watching a real lap overlay.
+        # Camera: smoothed midpoint of both real positions.
+        t1_s = self.tel1["TimeS"].values
+        t2_s = self.tel2["TimeS"].values
+        t_grid = np.linspace(0, lt1, _N_CAM)
+        cam_x = (np.interp(t_grid, t1_s, self.tel1["X"].values) +
+                 np.interp(t_grid, t2_s, self.tel2["X"].values)) / 2
+        cam_y = (np.interp(t_grid, t1_s, self.tel1["Y"].values) +
+                 np.interp(t_grid, t2_s, self.tel2["Y"].values)) / 2
         self._cam_x = _rolling_mean(cam_x, _CAM_SMOOTH_WINDOW)
         self._cam_y = _rolling_mean(cam_y, _CAM_SMOOTH_WINDOW)
-        self._lap_ratio = ratio
+        self._t_grid = t_grid
 
         # Delta trace: for each NormDist position along d1's path, how many seconds
         # is d2 behind?  We must evaluate d2's time at the same normalized distance
@@ -260,21 +248,16 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
+        T = progress * self._t1_laptime   # elapsed time in seconds
 
-        # d1 fraction = progress; d2 fraction = progress * (t1/t2)
-        # Because t1 < t2 (d1 faster), f2 < f1 → d2 always behind d1 on track.
-        # Using float fractions + np.interp avoids int-truncation erasing small gaps.
-        f1 = progress
-        f2 = progress * self._lap_ratio
-
-        x1 = _frac_interp(f1, self.tel1["X"].values)
-        y1 = _frac_interp(f1, self.tel1["Y"].values)
-        # Use d2's own GPS track if phase-aligned; otherwise use d1's reference
-        # track to avoid the visual start-position offset from the data gap.
-        d2_x_src = self.tel2["X"].values if self._phase_aligned else self.tel1["X"].values
-        d2_y_src = self.tel2["Y"].values if self._phase_aligned else self.tel1["Y"].values
-        x2 = _frac_interp(f2, d2_x_src)
-        y2 = _frac_interp(f2, d2_y_src)
+        # Place each car at their real GPS position at time T.
+        # np.interp on the monotonic TimeS arrays gives smooth, jump-free positions.
+        t1 = self.tel1["TimeS"].values
+        t2 = self.tel2["TimeS"].values
+        x1 = float(np.interp(T, t1, self.tel1["X"].values))
+        y1 = float(np.interp(T, t1, self.tel1["Y"].values))
+        x2 = float(np.interp(T, t2, self.tel2["X"].values))
+        y2 = float(np.interp(T, t2, self.tel2["Y"].values))
 
         cam_idx = int(progress * (_N_CAM - 1))
         self._pan_to(self._cam_x[cam_idx], self._cam_y[cam_idx])
@@ -289,23 +272,20 @@ class QualifyingMap(Visualization):
             dot.set_data([x], [y])
             lbl.set_position((x, y + label_dy))
 
-        # Mini-map in original (pre-perspective) coordinates
-        self._mini_dot1.set_data(
-            [_frac_interp(f1, self._orig1_x)],
-            [_frac_interp(f1, self._orig1_y)],
-        )
-        mini2_x = self._orig2_x if self._phase_aligned else self._orig1_x
-        mini2_y = self._orig2_y if self._phase_aligned else self._orig1_y
-        self._mini_dot2.set_data(
-            [_frac_interp(f2, mini2_x)],
-            [_frac_interp(f2, mini2_y)],
-        )
+        # Mini-map: original (pre-perspective) coordinates
+        mx1 = float(np.interp(T, t1, self._orig1_x))
+        my1 = float(np.interp(T, t1, self._orig1_y))
+        mx2 = float(np.interp(T, t2, self._orig2_x))
+        my2 = float(np.interp(T, t2, self._orig2_y))
+        self._mini_dot1.set_data([mx1], [my1])
+        self._mini_dot2.set_data([mx2], [my2])
 
-        idx = int(f1 * (len(self._delta) - 1))
+        # Delta: at d1's current normalized distance, how many seconds behind is d2?
+        idx = int(progress * (len(self._delta) - 1))
         delta = self._delta[idx]
 
         self._draw_top()
-        self._draw_bottom(progress, delta, f2)
+        self._draw_bottom(progress, delta)
 
     def _draw_top(self) -> None:
         ax = self._ax_top
@@ -320,7 +300,7 @@ class QualifyingMap(Visualization):
         ax.text(0.5, 0.28, "TOP 2  ·  Q LAP COMPARISON", color=_TEXT_DIM,
                 fontsize=9, ha="center", va="center", fontfamily="monospace")
 
-    def _draw_bottom(self, progress: float, delta: float, f2: float) -> None:
+    def _draw_bottom(self, progress: float, delta: float) -> None:
         ax = self._ax_bot
         ax.cla()
         ax.set_facecolor(_BG)
