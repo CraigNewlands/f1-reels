@@ -27,13 +27,9 @@ _GREY_SEG = (0.25, 0.25, 0.25, 0.6)   # unvisited track segment colour
 # Panels: title / track / leaderboard
 _RATIOS = [0.07, 0.73, 0.20]
 
-# 55 % of frames for racing, 45 % for the zoom-out + hold
-_RACE_FRAC = 0.55
-_ZOOM_FRAC = 0.45
-
-# Zoom animation completes in this fraction of the non-racing frames,
-# then holds the full-track view for the rest
-_ZOOM_ANIM_FRAC = 0.35
+# Fixed durations for zoom-out animation and full-track hold
+_ZOOM_ANIM_S = 5.0   # seconds for the zoom-out animation
+_HOLD_S      = 5.0   # seconds to hold the full coloured circuit
 
 
 def _hex_to_rgba(h: str, alpha: float = 1.0) -> tuple:
@@ -69,8 +65,9 @@ class MatplotlibRenderer:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         total_frames = fps * int(duration_s)
-        race_frames  = int(total_frames * _RACE_FRAC)
-        zoom_frames  = total_frames - race_frames
+        zoom_anim_frames = int(_ZOOM_ANIM_S * fps)
+        hold_frames      = int(_HOLD_S * fps)
+        race_frames      = total_frames - zoom_anim_frames - hold_frames
         max_lap_s    = max(d.lap_time_s for d in drivers)
         leader       = min(drivers, key=lambda d: d.official_laptime_s)
 
@@ -130,7 +127,7 @@ class MatplotlibRenderer:
         tdy = float(track.y[1] - track.y[-2])
         tn  = np.sqrt(tdx**2 + tdy**2)
         perp_x, perp_y = -tdy / tn, tdx / tn
-        sf_half = x_rng * 0.025
+        sf_half = max(x_rng, y_rng) * 0.008  # narrow dash, ~0.8% of track extent
         ax_track.plot(
             [sf_x - perp_x * sf_half, sf_x + perp_x * sf_half],
             [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
@@ -165,12 +162,12 @@ class MatplotlibRenderer:
             if frame < race_frames:
                 t             = (frame / max(race_frames - 1, 1)) * max_lap_s
                 zoom_progress = 0.0
+            elif frame < race_frames + zoom_anim_frames:
+                t             = max_lap_s
+                zoom_progress = (frame - race_frames) / max(zoom_anim_frames - 1, 1)
             else:
                 t             = max_lap_s
-                # Zoom completes in the first _ZOOM_ANIM_FRAC of the non-racing
-                # frames, then holds the full-track view for the remainder
-                anim_frames   = int(zoom_frames * _ZOOM_ANIM_FRAC)
-                zoom_progress = min((frame - race_frames) / max(anim_frames - 1, 1), 1.0)
+                zoom_progress = 1.0   # hold full track
 
             # ── Reveal coloured segments up to leader's current position ──
             nd_now     = leader.at(t)[2]
