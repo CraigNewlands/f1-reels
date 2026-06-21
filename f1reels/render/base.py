@@ -52,7 +52,12 @@ class Renderer:
         writer = FFMpegWriter(
             fps=self.fps,
             bitrate=8000,
-            extra_args=["-vcodec", "libx264", "-pix_fmt", "yuv420p"],
+            extra_args=[
+                "-vcodec", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-r", str(self.fps),   # force output fps — without this ffmpeg guesses
+                "-level:v", "5.1",     # H.264 level 5.1 supports 1080×1920 up to ~120fps
+            ],
         )
         anim.save(str(output_path), writer=writer, dpi=self.dpi)
         plt.close(fig)

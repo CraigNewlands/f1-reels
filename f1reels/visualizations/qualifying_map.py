@@ -14,10 +14,10 @@ _TEXT_MID = "#999999"
 _TEXT_BRIGHT = "#ffffff"
 
 _TILT = 0.42
-_VIEWPORT_FRAC = 0.22
+_VIEWPORT_FRAC = 0.13
 _MAP_ASPECT = 1.20
-_CAM_EMA = 0.10      # camera smoothing: lower = floatier/more lag, higher = stiffer
-_DOT_EMA = 0.20      # driver dot smoothing: accumulates sub-pixel moves to avoid freeze-jump
+_CAM_EMA = 0.25      # camera smoothing: lower = floatier/more lag, higher = stiffer
+_RACE_FRAC = 0.80    # lap animation fills first 80% of video; last 20% freezes on result
 _TAIL_LEN = 30       # frames of comet tail per car
 
 
@@ -28,20 +28,8 @@ def _fmt_laptime(td) -> str:
     return f"{m}:{s:06.3f}"
 
 
-def _rolling_mean(arr: np.ndarray, window: int) -> np.ndarray:
-    half = window // 2
-    padded = np.pad(arr, half, mode="reflect")
-    return np.convolve(padded, np.ones(window) / window, mode="valid")[: len(arr)]
-
-
 def _frac_interp(fraction: float, values: np.ndarray) -> float:
-    """Scalar: interpolate into values using a 0→1 fraction."""
     return float(np.interp(fraction, np.linspace(0, 1, len(values)), values))
-
-
-def _frac_interp_array(fractions: np.ndarray, values: np.ndarray) -> np.ndarray:
-    """Vector: interpolate into values for an array of 0→1 fractions."""
-    return np.interp(fractions, np.linspace(0, 1, len(values)), values)
 
 
 def _pca_rotation_angle(x: np.ndarray, y: np.ndarray) -> float:
@@ -110,6 +98,7 @@ class QualifyingMap(Visualization):
 
         self._t1_laptime = lt1
         self._t2_laptime = lt2
+        self._official_gap_s = (self.d2["laptime"] - self.d1["laptime"]).total_seconds()
 
         # ── Single rail: use d1's GPS track for both dot positions ──────
         # GPS drift between two independent receivers (1–2 m inherent in civil
@@ -229,11 +218,7 @@ class QualifyingMap(Visualization):
 
         self._ax_map.set_autoscale_on(False)
 
-        # EMA state — seeded at lap start, updated every frame
         self._cam_live = list(self._cam_start)
-        self._f1_live  = 0.0   # smoothed NormDist for d1
-        self._f2_live  = 0.0   # smoothed NormDist for d2
-        # Position history for comet tails
         self._pos_hist: list[tuple] = []
 
         self._pan_to(*self._cam_start)
@@ -249,46 +234,34 @@ class QualifyingMap(Visualization):
 
     def draw_frame(self, fig: plt.Figure, frame: int, total_frames: int) -> None:
         progress = min(frame / max(total_frames - 1, 1), 1.0)
-        T = progress * self._t1_laptime
+        frozen = progress >= _RACE_FRAC
 
-        # Target NormDist for each driver at time T (real speed profile)
-        tf1 = float(np.interp(T, self._t1_timelookup, self._t1_normdist))
-        tf2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
+        T  = self._t1_laptime if frozen else (progress / _RACE_FRAC) * self._t1_laptime
+        f1 = float(np.interp(T, self._t1_timelookup, self._t1_normdist))
+        f2 = float(np.interp(T, self._t2_timelookup, self._t2_normdist))
+        delta = self._official_gap_s if frozen else float(
+            self._delta[min(int(f1 * (len(self._delta) - 1)), len(self._delta) - 1)]
+        )
 
-        # EMA smoothing on the NormDist values: accumulates sub-pixel motion so
-        # dots glide continuously instead of freezing then jumping (which happens
-        # in slow corners where each frame moves < 1 screen pixel).
-        self._f1_live += _DOT_EMA * (tf1 - self._f1_live)
-        self._f2_live += _DOT_EMA * (tf2 - self._f2_live)
-        f1, f2 = self._f1_live, self._f2_live
-
-        # Both dots plotted on d1's perspective-transformed track
         x1 = _frac_interp(f1, self.tel1["X"].values)
         y1 = _frac_interp(f1, self.tel1["Y"].values)
         x2 = _frac_interp(f2, self.tel1["X"].values)
         y2 = _frac_interp(f2, self.tel1["Y"].values)
 
-        # EMA camera — glides toward the midpoint between both dots
-        target_x = (x1 + x2) / 2
-        target_y = (y1 + y2) / 2
-        a = _CAM_EMA
-        self._cam_live[0] += a * (target_x - self._cam_live[0])
-        self._cam_live[1] += a * (target_y - self._cam_live[1])
+        self._cam_live[0] += _CAM_EMA * ((x1 + x2) / 2 - self._cam_live[0])
+        self._cam_live[1] += _CAM_EMA * ((y1 + y2) / 2 - self._cam_live[1])
         self._pan_to(self._cam_live[0], self._cam_live[1])
 
         label_dy = self._viewport_r * 0.10
 
-        # Comet tails
-        self._pos_hist.append((x1, y1, x2, y2))
-        if len(self._pos_hist) > _TAIL_LEN:
-            self._pos_hist.pop(0)
+        if not frozen:
+            self._pos_hist.append((x1, y1, x2, y2))
+            if len(self._pos_hist) > _TAIL_LEN:
+                self._pos_hist.pop(0)
+
         if len(self._pos_hist) > 1:
-            h1x = [p[0] for p in self._pos_hist]
-            h1y = [p[1] for p in self._pos_hist]
-            h2x = [p[2] for p in self._pos_hist]
-            h2y = [p[3] for p in self._pos_hist]
-            self._tail1.set_data(h1x, h1y)
-            self._tail2.set_data(h2x, h2y)
+            self._tail1.set_data([p[0] for p in self._pos_hist], [p[1] for p in self._pos_hist])
+            self._tail2.set_data([p[2] for p in self._pos_hist], [p[3] for p in self._pos_hist])
 
         for halo, dot, lbl, x, y in (
             (self._halo1, self._dot1, self._lbl1, x1, y1),
@@ -298,18 +271,11 @@ class QualifyingMap(Visualization):
             dot.set_data([x], [y])
             lbl.set_position((x, y + label_dy))
 
-        # Mini-map: both dots on d1's original (pre-perspective) track
-        self._mini_dot1.set_data([_frac_interp(f1, self._orig1_x)],
-                                  [_frac_interp(f1, self._orig1_y)])
-        self._mini_dot2.set_data([_frac_interp(f2, self._orig1_x)],
-                                  [_frac_interp(f2, self._orig1_y)])
-
-        # Delta at d1's actual NormDist position
-        idx   = min(int(f1 * (len(self._delta) - 1)), len(self._delta) - 1)
-        delta = self._delta[idx]
+        self._mini_dot1.set_data([_frac_interp(f1, self._orig1_x)], [_frac_interp(f1, self._orig1_y)])
+        self._mini_dot2.set_data([_frac_interp(f2, self._orig1_x)], [_frac_interp(f2, self._orig1_y)])
 
         self._draw_top()
-        self._draw_bottom(progress, delta)
+        self._draw_bottom(f1, f2, delta, progress)
 
     def _draw_top(self) -> None:
         ax = self._ax_top
@@ -324,7 +290,7 @@ class QualifyingMap(Visualization):
         ax.text(0.5, 0.28, "TOP 2  ·  Q LAP COMPARISON", color=_TEXT_DIM,
                 fontsize=9, ha="center", va="center", fontfamily="monospace")
 
-    def _draw_bottom(self, progress: float, delta: float) -> None:
+    def _draw_bottom(self, f1: float, f2: float, delta: float, progress: float) -> None:
         ax = self._ax_bot
         ax.cla()
         ax.set_facecolor(_BG)
@@ -332,22 +298,18 @@ class QualifyingMap(Visualization):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
 
-        secs = abs(delta)
-        speed_ms = self._vmax / 3.6 * 0.7   # rough midfield speed for metre estimate
-        metres = secs * speed_ms
+        leader, trailer = (self.d1, self.d2) if f1 >= f2 else (self.d2, self.d1)
 
-        leader, trailer = (self.d1, self.d2) if delta >= 0 else (self.d2, self.d1)
+        _kw = dict(fontfamily="monospace", va="center")
+        for pos, driver, y in [("1", leader, 0.74), ("2", trailer, 0.42)]:
+            ax.text(0.03, y, pos, color=_TEXT_DIM, fontsize=10, fontweight="bold", **_kw)
+            ax.plot([0.10], [y], "o", color=driver["color"], markersize=13, zorder=5)
+            ax.text(0.16, y, driver["abbr"], color=driver["color"],
+                    fontsize=13, fontweight="bold", **_kw)
 
-        self._gap_row(ax, y=0.73, driver=leader, label="LEADER")
-        self._gap_row(ax, y=0.38, driver=trailer,
-                      label=f"+{metres:.0f}m  (+{secs:.3f}s)")
+        ax.text(0.16, 0.42 - 0.19, f"+{abs(delta):.3f}s",
+                color=_TEXT_MID, fontsize=9, **_kw)
 
-        ax.barh(0.07, 0.64, height=0.09, color="#1e1e1e", left=0)
-        ax.barh(0.07, 0.64 * progress, height=0.09, color="#3a3a3a", left=0)
-
-    def _gap_row(self, ax, y: float, driver: dict, label: str) -> None:
-        ax.plot([0.035], [y], "o", color=driver["color"], markersize=13, zorder=5)
-        ax.text(0.09, y + 0.11, driver["abbr"], color=driver["color"],
-                fontsize=13, fontweight="bold", va="center", fontfamily="monospace")
-        ax.text(0.09, y - 0.15, label, color=_TEXT_MID,
-                fontsize=9, va="center", fontfamily="monospace")
+        bar_progress = min(progress / _RACE_FRAC, 1.0)
+        ax.barh(0.09, 0.64, height=0.09, color="#1e1e1e", left=0)
+        ax.barh(0.09, 0.64 * bar_progress, height=0.09, color="#3a3a3a", left=0)
