@@ -130,10 +130,12 @@ class MatplotlibRenderer:
             all_finished   = len(racing) == 0
             leader_laptime = finished[0].official_laptime_s if finished else None
 
-            n = len(ranked)
+            n     = len(ranked)
+            # Cap row spacing so 3 drivers sit close together; scales down for more
+            row_gap = min(0.18, 0.65 / max(n - 1, 1))
             for rank, drv in enumerate(ranked):
                 _, _, nd = drv.at(t)
-                row_y = 0.88 - rank * (0.70 / max(n - 1, 1))
+                row_y = 0.88 - rank * row_gap
                 ax_board.text(0.04, row_y, str(rank + 1),
                               color=_DIM, fontsize=9, fontweight="bold",
                               va="center", fontfamily="monospace")
@@ -141,12 +143,16 @@ class MatplotlibRenderer:
                 ax_board.text(0.15, row_y, drv.abbr,
                               color=drv.color, fontsize=11, fontweight="bold",
                               va="center", fontfamily="monospace")
-                if rank > 0:
+                if rank == 0 and all_finished:
+                    # Leader: show full lap time when race is over
+                    m   = int(leader_laptime // 60)
+                    sec = leader_laptime % 60
+                    ax_board.text(0.42, row_y, f"{m}:{sec:06.3f}",
+                                  color=_MID, fontsize=8, va="center", fontfamily="monospace")
+                elif rank > 0:
                     if drv in finished:
-                        # This driver has finished — show official gap to P1
                         gap_s = drv.official_laptime_s - leader_laptime
                     else:
-                        # Still racing — show nd-based gap to leader
                         leader_nd = ranked[0].at(t)[2]
                         gap_s = (leader_nd - nd) * max_lap_s
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
