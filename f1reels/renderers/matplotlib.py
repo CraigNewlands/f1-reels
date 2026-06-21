@@ -112,14 +112,16 @@ class MatplotlibRenderer:
             ax_board.set_xlim(0, 1)
             ax_board.set_ylim(0, 1)
 
-            # When all drivers have crossed the finish line use official lap-time
-            # order and gaps rather than position-based (which all show 0 at nd=1).
+            # Time rescaling means nd-based order is correct throughout the lap.
+            # When all finish (all nd=1.0), nd sort is unstable on equal values so
+            # we fall back to official_laptime_s.  We always need all_finished for
+            # the gap switch: nd-based gap collapses to 0 once everyone is at 1.0.
             all_finished = all(d.at(t)[2] >= 1.0 for d in drivers)
             if all_finished:
-                ranked = sorted(drivers, key=lambda d: d.official_laptime_s)
+                ranked        = sorted(drivers, key=lambda d: d.official_laptime_s)
                 leader_laptime = ranked[0].official_laptime_s
             else:
-                ranked = list(reversed(ordered))  # ordered was nd-ascending → reverse for leader-first
+                ranked         = list(reversed(ordered))  # nd-ascending → leader first
                 leader_laptime = None
 
             n = len(ranked)
