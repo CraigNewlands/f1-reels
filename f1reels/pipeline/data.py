@@ -185,6 +185,7 @@ def build_driver_frames(
     track: TrackShape,
     color: str,
     abbr: str,
+    official_laptime_s: float,
     rate_hz: float = 30.0,
 ) -> DriverFrames:
     """Full pipeline for one driver: packets → resample → positions → DriverFrames."""
@@ -193,4 +194,10 @@ def build_driver_frames(
     total_dist_m = odometry[-1].distance_m
     norm_pts     = resample(packets, total_dist_m, rate_hz=rate_hz)
     positions    = compute_positions(norm_pts, track)
-    return DriverFrames(abbr=abbr, color=color, positions=positions, packets=packets)
+    return DriverFrames(
+        abbr=abbr,
+        color=color,
+        positions=positions,
+        packets=packets,
+        official_laptime_s=official_laptime_s,
+    )

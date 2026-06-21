@@ -131,8 +131,10 @@ def main():
             info  = session.get_driver(drv)
             abbr  = info["Abbreviation"]
             color = driver_color(abbr, info.get("TeamName", ""))
-            lap   = session.laps.pick_drivers(drv).pick_fastest()
-            df    = build_driver_frames(lap, track, color, abbr)
+            lap        = session.laps.pick_drivers(drv).pick_fastest()
+            q3_row     = session.results[session.results["DriverNumber"] == str(drv)].iloc[0]
+            official_s = float(q3_row["Q3"].total_seconds())
+            df         = build_driver_frames(lap, track, color, abbr, official_laptime_s=official_s)
             drivers.append(df)
             print(f"  {abbr}  {len(df.packets)} packets → {len(df.positions)} @ 30 Hz")
         except Exception as e:

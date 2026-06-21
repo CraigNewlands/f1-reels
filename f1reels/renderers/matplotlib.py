@@ -116,8 +116,8 @@ class MatplotlibRenderer:
             # order and gaps rather than position-based (which all show 0 at nd=1).
             all_finished = all(d.at(t)[2] >= 1.0 for d in drivers)
             if all_finished:
-                ranked = sorted(drivers, key=lambda d: d.lap_time_s)
-                leader_laptime = ranked[0].lap_time_s
+                ranked = sorted(drivers, key=lambda d: d.official_laptime_s)
+                leader_laptime = ranked[0].official_laptime_s
             else:
                 ranked = list(reversed(ordered))  # ordered was nd-ascending → reverse for leader-first
                 leader_laptime = None
@@ -135,7 +135,7 @@ class MatplotlibRenderer:
                               va="center", fontfamily="monospace")
                 if rank > 0:
                     if all_finished:
-                        gap_s = drv.lap_time_s - leader_laptime
+                        gap_s = drv.official_laptime_s - leader_laptime
                     else:
                         leader_nd = ranked[0].at(t)[2]
                         gap_s = (leader_nd - nd) * max_lap_s

@@ -72,9 +72,10 @@ class DriverFrames:
     """Everything a renderer needs for one driver: 30 Hz positions (with norm_dist)
     and native-rate packets (for speed readout)."""
     abbr: str
-    color: str          # hex e.g. "#FF8000"
+    color: str                  # hex e.g. "#FF8000"
     positions: list[CarPositionAtTime]
     packets: list[CarPacket]
+    official_laptime_s: float   # from session.results Q3 column (official timing loop)
 
     # Fast numpy arrays built once for interpolation — not part of the public model
     _t: np.ndarray = field(init=False, repr=False)

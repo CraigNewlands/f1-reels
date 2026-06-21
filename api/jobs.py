@@ -100,8 +100,10 @@ def _run_render(job_id: str, req: RenderRequest) -> None:
                     continue
                 team  = info.get("TeamName", "")
                 color = driver_color(abbr, team)
-                lap   = session.laps.pick_drivers(drv_num).pick_fastest()
-                df    = build_driver_frames(lap, track, color, abbr)
+                lap        = session.laps.pick_drivers(drv_num).pick_fastest()
+                q3_row     = session.results[session.results["DriverNumber"] == str(drv_num)].iloc[0]
+                official_s = float(q3_row["Q3"].total_seconds())
+                df         = build_driver_frames(lap, track, color, abbr, official_laptime_s=official_s)
                 drivers.append(df)
             except Exception:
                 pass
