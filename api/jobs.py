@@ -89,9 +89,10 @@ def _run_render(job_id: str, req: RenderRequest) -> None:
 
         # Filter to requested drivers (or all Q3)
         target_abbrs = {a.upper() for a in req.drivers} if req.drivers else None
+        drv_pool = q3_drivers[: req.top_n] if req.top_n else q3_drivers
 
         drivers = []
-        for drv_num in q3_drivers:
+        for drv_num in drv_pool:
             try:
                 info  = session.get_driver(drv_num)
                 abbr  = info["Abbreviation"]

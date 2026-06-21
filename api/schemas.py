@@ -13,6 +13,11 @@ class RenderRequest(BaseModel):
         description="Driver abbreviations to include. None = all Q3 drivers.",
         example=["PIA", "NOR"],
     )
+    top_n: int | None = Field(
+        None,
+        description="Limit to top N Q3 finishers by classification. Applied after drivers filter.",
+        example=3,
+    )
 
 
 class JobStatus(BaseModel):
