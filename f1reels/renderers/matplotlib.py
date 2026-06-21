@@ -142,12 +142,14 @@ class MatplotlibRenderer:
         # ── Driver dots ───────────────────────────────────────────────────
         dot_artists = {}
         for drv in drivers:
-            halo, = ax_track.plot([], [], "o", color=drv.color, markersize=28, alpha=0.18, zorder=3)
-            dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=13,
+            halo, = ax_track.plot([], [], "o", color=drv.color, markersize=16, alpha=0.20, zorder=3)
+            dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=12,
                                   markeredgecolor=_WHITE, markeredgewidth=1.0, zorder=4)
             lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
-                                  fontsize=7, fontweight="bold",
-                                  ha="center", va="bottom", fontfamily="monospace", zorder=5)
+                                  fontsize=8, fontweight="bold",
+                                  ha="center", va="bottom", fontfamily="monospace", zorder=5,
+                                  bbox=dict(boxstyle="round,pad=0.15", facecolor=_BG,
+                                            edgecolor="none", alpha=0.75))
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
@@ -175,14 +177,17 @@ class MatplotlibRenderer:
             colour_arr[:reveal_idx] = final_rgba[:reveal_idx]
             colour_lc.set_color(colour_arr)
 
-            # ── Move dots ─────────────────────────────────────────────────
+            # ── Move dots — P1 always rendered on top ─────────────────────
+            ordered  = sorted(drivers, key=lambda d: d.at(t)[2])  # nd ascending
             leader_x = leader_y = 0.0
-            for drv in drivers:
+            # reversed = P1 first; give P1 highest z so it always draws on top
+            for rank, drv in enumerate(reversed(ordered)):
                 x, y, _ = drv.at(t)
                 halo, dot, lbl = dot_artists[drv.abbr]
-                halo.set_data([x], [y])
-                dot.set_data([x], [y])
-                lbl.set_position((x, y + _lbl_dy[0]))
+                z = 10 + (len(drivers) - rank) * 3
+                halo.set_data([x], [y]); halo.set_zorder(z)
+                dot.set_data([x], [y]);  dot.set_zorder(z + 1)
+                lbl.set_position((x, y + _lbl_dy[0])); lbl.set_zorder(z + 2)
                 if drv is leader:
                     leader_x, leader_y = x, y
 
