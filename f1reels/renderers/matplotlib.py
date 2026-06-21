@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,26 +10,32 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter, FuncAnimation
+from matplotlib.collections import LineCollection
 
 from f1reels.pipeline.models import DriverFrames, TrackShape
 
 matplotlib.use("Agg")
 
-_W, _H = 9, 16          # inches  →  1080 × 1920 px at 120 dpi
+_W, _H = 9, 16
 _DPI   = 120
 _BG    = "#0d0d0d"
 _WHITE = "#ffffff"
 _DIM   = "#444444"
 _MID   = "#888888"
 
-# Layout: top label band / track / leaderboard
-_RATIOS = [0.08, 0.72, 0.20]
+# 4 panels: title / track / delta graph / leaderboard
+_RATIOS = [0.06, 0.60, 0.15, 0.19]
 
 
 def _hex_to_rgba(h: str, alpha: float = 1.0) -> tuple:
     h = h.lstrip("#")
     r, g, b = (int(h[i:i+2], 16) / 255 for i in (0, 2, 4))
     return r, g, b, alpha
+
+
+def _fmt_laptime(s: float) -> str:
+    m = int(s // 60)
+    return f"{m}:{s % 60:06.3f}"
 
 
 class MatplotlibRenderer:
@@ -51,101 +56,136 @@ class MatplotlibRenderer:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         total_frames = fps * int(duration_s)
         max_lap_s    = max(d.lap_time_s for d in drivers)
+        leader       = min(drivers, key=lambda d: d.official_laptime_s)
 
         fig = plt.figure(figsize=(_W, _H), facecolor=_BG, dpi=_DPI)
-        gs  = fig.add_gridspec(3, 1, height_ratios=_RATIOS, hspace=0)
+        gs  = fig.add_gridspec(4, 1, height_ratios=_RATIOS, hspace=0)
 
         ax_top   = fig.add_subplot(gs[0])
         ax_track = fig.add_subplot(gs[1])
-        ax_board = fig.add_subplot(gs[2])
-        for ax in (ax_top, ax_track, ax_board):
+        ax_delta = fig.add_subplot(gs[2])
+        ax_board = fig.add_subplot(gs[3])
+        for ax in (ax_top, ax_track, ax_delta, ax_board):
             ax.set_facecolor(_BG)
             ax.axis("off")
 
-        # ── Static track ──────────────────────────────────────────────────
-        pts = track.all_points()
-        ax_track.plot(pts[:, 0], pts[:, 1], color="#0a0a0a",  lw=22, solid_capstyle="round", zorder=0)
-        ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE,     lw=12, solid_capstyle="round", alpha=0.15, zorder=1)
-        ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE,     lw=3,  solid_capstyle="round", alpha=0.9,  zorder=2)
+        # ── Coloured track segments — coloured by who is fastest at each point ──
+        pts    = track.all_points()
+        n_segs = len(track.x) - 1
+        nd_mids = (np.arange(n_segs) + 0.5) / n_segs
+        seg_colors = [
+            _hex_to_rgba(min(drivers, key=lambda d: d.time_at_norm_dist(float(nd))).color)
+            for nd in nd_mids
+        ]
+        segments = [
+            [[track.x[i], track.y[i]], [track.x[i + 1], track.y[i + 1]]]
+            for i in range(n_segs)
+        ]
+        ax_track.add_collection(LineCollection(segments, colors=seg_colors, linewidths=8, zorder=1))
+
+        # ── Track outline on top (thin white centre line) ─────────────────
+        ax_track.plot(pts[:, 0], pts[:, 1], color="#0a0a0a", lw=18, solid_capstyle="round", zorder=0)
+        ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE,    lw=1.5, solid_capstyle="round", alpha=0.6, zorder=2)
         ax_track.set_aspect("equal")
         ax_track.autoscale_view()
         ax_track.set_autoscale_on(False)
 
-        # ── Start/finish line ─────────────────────────────────────────────
-        # Perpendicular to the track direction at the start/finish point
+        # ── Start/finish line ──────────────────────────────────────────────
         sf_x, sf_y = track.x[0], track.y[0]
-        dx = float(track.x[1] - track.x[-2])
-        dy = float(track.y[1] - track.y[-2])
-        norm = np.sqrt(dx**2 + dy**2)
-        dx, dy = dx / norm, dy / norm          # unit vector along track
-        perp_x, perp_y = -dy, dx               # perpendicular
-        x_rng = pts[:, 0].max() - pts[:, 0].min()
-        half  = x_rng * 0.025                  # line half-length ~2.5% of track width
+        tdx = float(track.x[1] - track.x[-2])
+        tdy = float(track.y[1] - track.y[-2])
+        tn  = np.sqrt(tdx**2 + tdy**2)
+        tdx, tdy = tdx / tn, tdy / tn
+        perp_x, perp_y = -tdy, tdx
+        half = (pts[:, 0].max() - pts[:, 0].min()) * 0.025
         ax_track.plot(
             [sf_x - perp_x * half, sf_x + perp_x * half],
             [sf_y - perp_y * half, sf_y + perp_y * half],
-            color=_WHITE, lw=2.5, zorder=2,   # under the car dots (zorder 3-5)
+            color=_WHITE, lw=2.5, zorder=2,
         )
 
-        # ── Driver dots (one per driver) ──────────────────────────────────
+        # ── Driver dots ───────────────────────────────────────────────────
         dot_artists = {}
+        y_rng  = pts[:, 1].max() - pts[:, 1].min()
+        lbl_dy = y_rng * 0.015
         for drv in drivers:
-            rgba  = _hex_to_rgba(drv.color)
             halo, = ax_track.plot([], [], "o", color=drv.color, markersize=28, alpha=0.18, zorder=3)
             dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=13,
                                   markeredgecolor=_WHITE, markeredgewidth=1.0, zorder=4)
             lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
-                                  fontsize=7, fontweight="bold", ha="center", va="bottom",
-                                  fontfamily="monospace", zorder=5)
+                                  fontsize=7, fontweight="bold",
+                                  ha="center", va="bottom", fontfamily="monospace", zorder=5)
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
-        # y-offset for labels relative to track scale
-        y_rng = pts[:, 1].max() - pts[:, 1].min()
-        lbl_dy = y_rng * 0.015
+        # ── Delta time graph — pre-compute full gap traces ─────────────────
+        nd_grid   = np.linspace(0, 1, 600)
+        trailers  = [d for d in drivers if d is not leader]
+        gap_traces = {
+            d.abbr: np.array([d.time_at_norm_dist(nd) - leader.time_at_norm_dist(nd)
+                              for nd in nd_grid])
+            for d in trailers
+        }
 
+        ax_delta.set_xlim(0, 1)
+        all_gaps  = np.concatenate(list(gap_traces.values()))
+        gap_max   = max(abs(all_gaps).max() * 1.3, 0.05)
+        ax_delta.set_ylim(-gap_max, gap_max)
+        ax_delta.set_autoscale_on(False)
 
+        # Zero line
+        ax_delta.axhline(0, color=_DIM, lw=0.8, zorder=0)
+
+        # Tiny axis label
+        ax_delta.text(0.01, 0.92, "Δ gap (s)", color=_DIM, fontsize=6,
+                      transform=ax_delta.transAxes, va="top", fontfamily="monospace")
+
+        # Animated gap lines — created once, updated each frame
+        delta_lines = {}
+        for drv in trailers:
+            line, = ax_delta.plot([], [], color=drv.color, lw=1.5, zorder=2)
+            delta_lines[drv.abbr] = line
+
+        # ── animate ───────────────────────────────────────────────────────
         def animate(frame: int) -> None:
             t = (frame / max(total_frames - 1, 1)) * max_lap_s
 
-            # Move each driver's dot
-            ordered = sorted(drivers, key=lambda d: d.at(t)[2])  # norm_dist ascending
+            # Move dots
+            ordered = sorted(drivers, key=lambda d: d.at(t)[2])
             for drv in drivers:
-                x, y, nd = drv.at(t)
+                x, y, _ = drv.at(t)
                 halo, dot, lbl = dot_artists[drv.abbr]
                 halo.set_data([x], [y])
                 dot.set_data([x], [y])
                 lbl.set_position((x, y + lbl_dy))
 
-            # Leaderboard — redraw each frame
+            # Fill delta graph up to leader's current position
+            nd_now = leader.at(t)[2]
+            mask   = nd_grid <= nd_now
+            for drv in trailers:
+                delta_lines[drv.abbr].set_data(nd_grid[mask], gap_traces[drv.abbr][mask])
+
+            # Leaderboard
             ax_board.cla()
             ax_board.set_facecolor(_BG)
             ax_board.axis("off")
             ax_board.set_xlim(0, 1)
             ax_board.set_ylim(0, 1)
 
-            # Split into finished and still-racing.  Finished drivers are sorted
-            # by official lap time (stable, correct order even when multiple share
-            # nd=1.0).  Still-racing drivers are sorted by current nd position.
-            # This prevents swapping already-finished drivers while the last one
-            # is still on track.
             finished = sorted(
                 [d for d in drivers if d.at(t)[2] >= 1.0],
                 key=lambda d: d.official_laptime_s,
             )
             racing = sorted(
                 [d for d in drivers if d.at(t)[2] < 1.0],
-                key=lambda d: d.at(t)[2],
-                reverse=True,
+                key=lambda d: d.at(t)[2], reverse=True,
             )
-            ranked         = finished + racing
-            all_finished   = len(racing) == 0
-            leader_laptime = finished[0].official_laptime_s if finished else None
+            ranked       = finished + racing
+            all_finished = len(racing) == 0
+            leader_lt    = finished[0].official_laptime_s if finished else None
 
-            n     = len(ranked)
-            # Cap row spacing so 3 drivers sit close together; scales down for more
+            n       = len(ranked)
             row_gap = min(0.18, 0.65 / max(n - 1, 1))
             for rank, drv in enumerate(ranked):
-                _, _, nd = drv.at(t)
                 row_y = 0.88 - rank * row_gap
                 ax_board.text(0.04, row_y, str(rank + 1),
                               color=_DIM, fontsize=9, fontweight="bold",
@@ -155,23 +195,13 @@ class MatplotlibRenderer:
                               color=drv.color, fontsize=11, fontweight="bold",
                               va="center", fontfamily="monospace")
                 if rank == 0 and all_finished:
-                    # Leader: show full official lap time when everyone has finished
-                    m   = int(leader_laptime // 60)
-                    sec = leader_laptime % 60
-                    ax_board.text(0.42, row_y, f"{m}:{sec:06.3f}",
+                    ax_board.text(0.42, row_y, _fmt_laptime(leader_lt),
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
                 elif rank > 0:
-                    # Sector-delta gap: how many seconds behind is this driver at
-                    # the leader's current track position?
-                    # t_leader_here ≈ t (leader is there now), but use interp for
-                    # accuracy when leader is at nd=1.0 (finished).
-                    nd_leader  = ranked[0].at(t)[2]
-                    t_leader   = ranked[0].time_at_norm_dist(nd_leader)
-                    t_trailer  = drv.time_at_norm_dist(nd_leader)
-                    gap_s      = max(t_trailer - t_leader, 0.0)
+                    nd_ldr  = ranked[0].at(t)[2]
+                    gap_s   = max(drv.time_at_norm_dist(nd_ldr) - ranked[0].time_at_norm_dist(nd_ldr), 0.0)
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
-
 
             if progress_cb is not None:
                 progress_cb(frame + 1, total_frames)
@@ -182,14 +212,13 @@ class MatplotlibRenderer:
         ax_top.text(0.5, 0.65, "Q LAP COMPARISON",
                     color=_WHITE, fontsize=12, fontweight="bold",
                     ha="center", va="center", fontfamily="monospace")
-        ax_top.text(0.5, 0.25, "TOP 10  ·  Q3",
+        ax_top.text(0.5, 0.25, f"TOP {len(drivers)}  ·  Q3",
                     color=_DIM, fontsize=8, ha="center", va="center", fontfamily="monospace")
 
         # ── Render ────────────────────────────────────────────────────────
         anim   = FuncAnimation(fig, animate, frames=total_frames, interval=1000 / fps)
         writer = FFMpegWriter(
-            fps=fps,
-            bitrate=8000,
+            fps=fps, bitrate=8000,
             extra_args=["-vcodec", "libx264", "-pix_fmt", "yuv420p",
                         "-r", str(fps), "-level:v", "5.1"],
         )
