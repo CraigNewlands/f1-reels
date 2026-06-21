@@ -188,12 +188,29 @@ def build_driver_frames(
     official_laptime_s: float,
     rate_hz: float = 30.0,
 ) -> DriverFrames:
-    """Full pipeline for one driver: packets → resample → positions → DriverFrames."""
+    """Full pipeline for one driver: packets → resample → positions → DriverFrames.
+
+    After resampling, all session_time_s values are rescaled so the lap ends at
+    exactly official_laptime_s.  Car data packet timing diverges from the
+    official transponder-loop timing by up to ~0.5s per driver, which is enough
+    to swap adjacent drivers (e.g. P2/P3 separated by 0.166s).  Rescaling fixes
+    the animation order without distorting the speed profile shape (scale is
+    typically <0.5%, imperceptible).
+    """
     packets      = extract_car_packets(lap)
     odometry     = build_odometry(packets)
     total_dist_m = odometry[-1].distance_m
     norm_pts     = resample(packets, total_dist_m, rate_hz=rate_hz)
-    positions    = compute_positions(norm_pts, track)
+
+    # Rescale time axis to match official lap time
+    car_laptime = packets[-1].session_time_s   # broadcast-clock duration
+    scale       = official_laptime_s / car_laptime if car_laptime > 0 else 1.0
+    norm_pts = [
+        NormalisedPoint(norm_dist=p.norm_dist, session_time_s=p.session_time_s * scale)
+        for p in norm_pts
+    ]
+
+    positions = compute_positions(norm_pts, track)
     return DriverFrames(
         abbr=abbr,
         color=color,
