@@ -162,11 +162,16 @@ def build_track_shape(
     arc_norm = arc / arc[-1]
     t_uni    = np.linspace(0.0, 1.0, n_out)
 
-    return TrackShape(
-        x=np.interp(t_uni, arc_norm, x_out),
-        y=np.interp(t_uni, arc_norm, y_out),
-        z=np.interp(t_uni, arc_norm, z_out),
-    )
+    x_final = np.interp(t_uni, arc_norm, x_out)
+    y_final = np.interp(t_uni, arc_norm, y_out)
+    z_final = np.interp(t_uni, arc_norm, z_out)
+
+    # Force the last point to equal the first so that lookup(1.0) returns
+    # the same position as lookup(0.0).  GPS laps start/end just before/after
+    # the timing beacon so the raw first and last points differ by ~10m.
+    x_final[-1], y_final[-1], z_final[-1] = x_final[0], y_final[0], z_final[0]
+
+    return TrackShape(x=x_final, y=y_final, z=z_final)
 
 
 def build_driver_frames(
