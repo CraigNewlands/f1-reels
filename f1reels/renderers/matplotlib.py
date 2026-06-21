@@ -172,19 +172,15 @@ class MatplotlibRenderer:
             colour_lc.set_color(colour_arr)
 
             # ── Move dots — P1 always rendered on top ─────────────────────
-            all_nd    = [d.at(t)[2] for d in drivers]
-            all_done  = all(nd >= 1.0 for nd in all_nd)
-            if all_done:
-                # Use official lap time for stable ordering when all at nd=1
-                ordered = sorted(drivers, key=lambda d: d.official_laptime_s, reverse=True)
-            else:
-                ordered = sorted(drivers, key=lambda d: d.at(t)[2])  # nd ascending
+            # Sort ascending by (nd, -official_laptime_s): when nd is equal
+            # (multiple drivers at 1.0), faster lap time sorts last → highest z
+            ordered  = sorted(drivers,
+                               key=lambda d: (d.at(t)[2], -d.official_laptime_s))
             leader_x = leader_y = 0.0
-            # First in ordered list = lowest nd / slowest → lowest z → drawn under
             for rank, drv in enumerate(ordered):
                 x, y, _ = drv.at(t)
                 halo, dot, lbl = dot_artists[drv.abbr]
-                z = 10 + rank * 3   # last in list (P1/fastest) gets highest z
+                z = 10 + rank * 3   # last entry = leader = highest z = drawn on top
                 halo.set_data([x], [y]); halo.set_zorder(z)
                 dot.set_data([x], [y]);  dot.set_zorder(z + 1)
                 lbl.set_position((x, y + _lbl_dy[0])); lbl.set_zorder(z + 2)
