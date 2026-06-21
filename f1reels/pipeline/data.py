@@ -145,6 +145,13 @@ def build_track_shape(
         if nans.any():
             arr[nans] = np.interp(t_bins[nans], t_bins[~nans], arr[~nans])
 
+    # Close the loop: GPS laps start just after the timing beacon and end just
+    # before it, so bin[0] and bin[-1] are physically close but not identical.
+    # Average them so the track starts and ends at the same point.
+    for arr in (x_med, y_med, z_med):
+        mid = (arr[0] + arr[-1]) / 2
+        arr[0] = arr[-1] = mid
+
     t_fine = np.linspace(0, n_bins - 1, n_out)
     x_out  = np.interp(t_fine, t_bins, x_med)
     y_out  = np.interp(t_fine, t_bins, y_med)
