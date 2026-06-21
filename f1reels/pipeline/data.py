@@ -158,20 +158,26 @@ def build_track_shape(
     y_out  = np.interp(t_fine, t_bins, y_med)
     z_out  = np.interp(t_fine, t_bins, z_med)
 
-    arc      = np.concatenate([[0.0], np.cumsum(np.sqrt(np.diff(x_out)**2 + np.diff(y_out)**2))])
+    # Close the loop BEFORE arc-length re-parameterisation.
+    # GPS laps start/end near the timing beacon with a ~10m gap. Appending
+    # the first point creates a 2001-point closed loop so the gap is treated
+    # as just another arc-length segment — no jump, smooth transition.
+    x_loop = np.append(x_out, x_out[0])
+    y_loop = np.append(y_out, y_out[0])
+    z_loop = np.append(z_out, z_out[0])
+
+    arc      = np.concatenate([[0.0], np.cumsum(np.sqrt(np.diff(x_loop)**2 + np.diff(y_loop)**2))])
     arc_norm = arc / arc[-1]
-    t_uni    = np.linspace(0.0, 1.0, n_out)
 
-    x_final = np.interp(t_uni, arc_norm, x_out)
-    y_final = np.interp(t_uni, arc_norm, y_out)
-    z_final = np.interp(t_uni, arc_norm, z_out)
+    # Re-parameterise to n_out+1 points (0→1 inclusive) so x[0] == x[-1].
+    # lookup(0.0) and lookup(1.0) both return the start/finish position.
+    t_uni = np.linspace(0.0, 1.0, n_out + 1)
 
-    # Force the last point to equal the first so that lookup(1.0) returns
-    # the same position as lookup(0.0).  GPS laps start/end just before/after
-    # the timing beacon so the raw first and last points differ by ~10m.
-    x_final[-1], y_final[-1], z_final[-1] = x_final[0], y_final[0], z_final[0]
-
-    return TrackShape(x=x_final, y=y_final, z=z_final)
+    return TrackShape(
+        x=np.interp(t_uni, arc_norm, x_loop),
+        y=np.interp(t_uni, arc_norm, y_loop),
+        z=np.interp(t_uni, arc_norm, z_loop),
+    )
 
 
 def build_driver_frames(
