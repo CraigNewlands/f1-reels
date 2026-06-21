@@ -112,17 +112,23 @@ class MatplotlibRenderer:
             ax_board.set_xlim(0, 1)
             ax_board.set_ylim(0, 1)
 
-            # Time rescaling means nd-based order is correct throughout the lap.
-            # When all finish (all nd=1.0), nd sort is unstable on equal values so
-            # we fall back to official_laptime_s.  We always need all_finished for
-            # the gap switch: nd-based gap collapses to 0 once everyone is at 1.0.
-            all_finished = all(d.at(t)[2] >= 1.0 for d in drivers)
-            if all_finished:
-                ranked        = sorted(drivers, key=lambda d: d.official_laptime_s)
-                leader_laptime = ranked[0].official_laptime_s
-            else:
-                ranked         = list(reversed(ordered))  # nd-ascending → leader first
-                leader_laptime = None
+            # Split into finished and still-racing.  Finished drivers are sorted
+            # by official lap time (stable, correct order even when multiple share
+            # nd=1.0).  Still-racing drivers are sorted by current nd position.
+            # This prevents swapping already-finished drivers while the last one
+            # is still on track.
+            finished = sorted(
+                [d for d in drivers if d.at(t)[2] >= 1.0],
+                key=lambda d: d.official_laptime_s,
+            )
+            racing = sorted(
+                [d for d in drivers if d.at(t)[2] < 1.0],
+                key=lambda d: d.at(t)[2],
+                reverse=True,
+            )
+            ranked         = finished + racing
+            all_finished   = len(racing) == 0
+            leader_laptime = finished[0].official_laptime_s if finished else None
 
             n = len(ranked)
             for rank, drv in enumerate(ranked):
@@ -136,9 +142,11 @@ class MatplotlibRenderer:
                               color=drv.color, fontsize=11, fontweight="bold",
                               va="center", fontfamily="monospace")
                 if rank > 0:
-                    if all_finished:
+                    if drv in finished:
+                        # This driver has finished — show official gap to P1
                         gap_s = drv.official_laptime_s - leader_laptime
                     else:
+                        # Still racing — show nd-based gap to leader
                         leader_nd = ranked[0].at(t)[2]
                         gap_s = (leader_nd - nd) * max_lap_s
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
