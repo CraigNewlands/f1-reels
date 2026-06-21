@@ -27,9 +27,13 @@ _GREY_SEG = (0.25, 0.25, 0.25, 0.6)   # unvisited track segment colour
 # Panels: title / track / leaderboard
 _RATIOS = [0.07, 0.73, 0.20]
 
-# 70 % of frames for racing, 30 % for the zoom-out reveal
-_RACE_FRAC = 0.70
-_ZOOM_FRAC = 0.30
+# 55 % of frames for racing, 45 % for the zoom-out + hold
+_RACE_FRAC = 0.55
+_ZOOM_FRAC = 0.45
+
+# Zoom animation completes in this fraction of the non-racing frames,
+# then holds the full-track view for the rest
+_ZOOM_ANIM_FRAC = 0.35
 
 
 def _hex_to_rgba(h: str, alpha: float = 1.0) -> tuple:
@@ -159,11 +163,14 @@ class MatplotlibRenderer:
         def animate(frame: int) -> None:
             # ── Timing ────────────────────────────────────────────────────
             if frame < race_frames:
-                t            = (frame / max(race_frames - 1, 1)) * max_lap_s
+                t             = (frame / max(race_frames - 1, 1)) * max_lap_s
                 zoom_progress = 0.0
             else:
-                t            = max_lap_s
-                zoom_progress = (frame - race_frames) / max(zoom_frames - 1, 1)
+                t             = max_lap_s
+                # Zoom completes in the first _ZOOM_ANIM_FRAC of the non-racing
+                # frames, then holds the full-track view for the remainder
+                anim_frames   = int(zoom_frames * _ZOOM_ANIM_FRAC)
+                zoom_progress = min((frame - race_frames) / max(anim_frames - 1, 1), 1.0)
 
             # ── Reveal coloured segments up to leader's current position ──
             nd_now     = leader.at(t)[2]
