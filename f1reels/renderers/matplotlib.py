@@ -172,13 +172,19 @@ class MatplotlibRenderer:
             colour_lc.set_color(colour_arr)
 
             # ── Move dots — P1 always rendered on top ─────────────────────
-            ordered  = sorted(drivers, key=lambda d: d.at(t)[2])  # nd ascending
+            all_nd    = [d.at(t)[2] for d in drivers]
+            all_done  = all(nd >= 1.0 for nd in all_nd)
+            if all_done:
+                # Use official lap time for stable ordering when all at nd=1
+                ordered = sorted(drivers, key=lambda d: d.official_laptime_s, reverse=True)
+            else:
+                ordered = sorted(drivers, key=lambda d: d.at(t)[2])  # nd ascending
             leader_x = leader_y = 0.0
-            # reversed = P1 first; give P1 highest z so it always draws on top
-            for rank, drv in enumerate(reversed(ordered)):
+            # First in ordered list = lowest nd / slowest → lowest z → drawn under
+            for rank, drv in enumerate(ordered):
                 x, y, _ = drv.at(t)
                 halo, dot, lbl = dot_artists[drv.abbr]
-                z = 10 + (len(drivers) - rank) * 3
+                z = 10 + rank * 3   # last in list (P1/fastest) gets highest z
                 halo.set_data([x], [y]); halo.set_zorder(z)
                 dot.set_data([x], [y]);  dot.set_zorder(z + 1)
                 lbl.set_position((x, y + _lbl_dy[0])); lbl.set_zorder(z + 2)
@@ -197,20 +203,13 @@ class MatplotlibRenderer:
             ax_track.set_xlim(cx - r, cx + r)
             ax_track.set_ylim(cy - r, cy + r)
 
-            # Scale all line widths with the viewport so nothing looks
-            # disproportionately thick or thin during the zoom-out
-            scale = zoom_r / r          # 1.0 when fully zoomed in, <1 when zoomed out
-            base_lc.set_linewidth(22 * scale)
-            colour_lc.set_linewidth(max(8 * scale, 1.5))
-            centre_line.set_linewidth(max(1.5 * scale, 0.4))
-
-            # Start/finish line length tracks viewport so it stays visible
+            # Start/finish line length proportional to viewport so it's
+            # always visually the same size relative to what's on screen
             sf_half = r * sf_frac
             sf_line.set_data(
                 [sf_x - perp_x * sf_half, sf_x + perp_x * sf_half],
                 [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
             )
-            sf_line.set_linewidth(max(2.5 * scale, 0.8))
 
             # Update label offset to match current viewport scale
             _lbl_dy[0] = r * 0.024
