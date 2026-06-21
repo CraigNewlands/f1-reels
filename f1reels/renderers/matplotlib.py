@@ -112,10 +112,19 @@ class MatplotlibRenderer:
             ax_board.set_xlim(0, 1)
             ax_board.set_ylim(0, 1)
 
-            leader_nd = ordered[-1].at(t)[2] if ordered else 1.0
-            n = len(drivers)
-            for rank, drv in enumerate(reversed(ordered)):
-                x_d, y_d, nd = drv.at(t)
+            # When all drivers have crossed the finish line use official lap-time
+            # order and gaps rather than position-based (which all show 0 at nd=1).
+            all_finished = all(d.at(t)[2] >= 1.0 for d in drivers)
+            if all_finished:
+                ranked = sorted(drivers, key=lambda d: d.lap_time_s)
+                leader_laptime = ranked[0].lap_time_s
+            else:
+                ranked = list(reversed(ordered))  # ordered was nd-ascending → reverse for leader-first
+                leader_laptime = None
+
+            n = len(ranked)
+            for rank, drv in enumerate(ranked):
+                _, _, nd = drv.at(t)
                 row_y = 0.88 - rank * (0.70 / max(n - 1, 1))
                 ax_board.text(0.04, row_y, str(rank + 1),
                               color=_DIM, fontsize=9, fontweight="bold",
@@ -125,8 +134,11 @@ class MatplotlibRenderer:
                               color=drv.color, fontsize=11, fontweight="bold",
                               va="center", fontfamily="monospace")
                 if rank > 0:
-                    gap_nd = leader_nd - nd
-                    gap_s  = gap_nd * max_lap_s
+                    if all_finished:
+                        gap_s = drv.lap_time_s - leader_laptime
+                    else:
+                        leader_nd = ranked[0].at(t)[2]
+                        gap_s = (leader_nd - nd) * max_lap_s
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
 
