@@ -38,6 +38,7 @@ import rerun.blueprint as rrb
 from scipy.interpolate import PchipInterpolator
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from f1reels.colors import driver_color
 from f1reels.config import CACHE_DIR
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -135,12 +136,14 @@ def extract_gps_fixes(lap) -> list[GpsFix]:
 
 def extract_car_packets(lap) -> list[CarPacket]:
     """Extract car telemetry packets. Speed comes from the wheel sensor (reliable).
-    session_time_s is the timing-beacon-based relative clock."""
+    session_time_s is lap-relative (0 = lap start) so drivers can be compared
+    on the same timeline regardless of when in the session they set their lap."""
     car = lap.get_car_data().reset_index(drop=True)
+    t0 = float(car["SessionTime"].iloc[0].total_seconds())
     return [
         CarPacket(
             speed_kph=float(row.Speed),
-            session_time_s=float(row.SessionTime.total_seconds()),
+            session_time_s=float(row.SessionTime.total_seconds()) - t0,
         )
         for _, row in car.iterrows()
     ]
@@ -293,22 +296,33 @@ def log_track(track: TrackShape, circuit_info) -> None:
     )
 
 
+def _hex_to_rgb(hex_color: str) -> list[int]:
+    h = hex_color.lstrip("#")
+    return [int(h[i:i+2], 16) for i in (0, 2, 4)]
+
+
 def log_driver(
     positions: list[CarPositionAtTime],
     packets: list[CarPacket],
     norm_pts: list[NormalisedPoint],
-    color: list[int],
+    color: str,   # hex e.g. "#FF8000"
     abbr: str,
 ) -> None:
     """Log animated car dot at 30 Hz and speed + lap progress at native ~3.7 Hz."""
+    rgb = _hex_to_rgb(color)
+
+    rr.log(f"car/{abbr}", rr.SeriesPoints(colors=[rgb], names=[abbr]), static=True)
+    rr.log(f"plots/speed/{abbr}",     rr.SeriesLines(colors=[rgb], names=[abbr]), static=True)
+    rr.log(f"plots/norm_dist/{abbr}", rr.SeriesLines(colors=[rgb], names=[abbr]), static=True)
+
     for pos in positions:
         rr.set_time("session_time_s", duration=pos.session_time_s)
-        rr.log(f"car/{abbr}", rr.Points2D([[pos.x, pos.y]], colors=[color], radii=14))
+        rr.log(f"car/{abbr}", rr.Points2D([[pos.x, pos.y]], colors=[rgb], radii=14))
 
     for pkt, np_pt in zip(packets, norm_pts):
         rr.set_time("session_time_s", duration=pkt.session_time_s)
-        rr.log("plots/speed",     rr.Scalars([pkt.speed_kph]))
-        rr.log("plots/norm_dist", rr.Scalars([np_pt.norm_dist]))
+        rr.log(f"plots/speed/{abbr}",     rr.Scalars([pkt.speed_kph]))
+        rr.log(f"plots/norm_dist/{abbr}", rr.Scalars([np_pt.norm_dist]))
 
 
 def make_blueprint() -> rrb.Blueprint:
@@ -327,7 +341,7 @@ def make_blueprint() -> rrb.Blueprint:
                     axis_y=rrb.ScalarAxis(zoom_lock=True),
                 ),
             ),
-            column_shares=[1, 1],
+            column_shares=[3, 2],
         ),
     )
 
@@ -357,26 +371,34 @@ def main():
     track = build_track_shape(all_fixes)
     print(f"  TrackShape: {len(track.x)} points")
 
-    # ── Build driver position for fastest lap ─────────────────────────────
-    lap = session.laps.pick_fastest()
-    abbr = session.get_driver(lap["DriverNumber"])["Abbreviation"]
-    print(f"Building position for {abbr} fastest lap …")
-
-    packets      = extract_car_packets(lap)
-    odometry     = build_odometry(packets)
-    total_dist_m = odometry[-1].distance_m
-    norm_pts     = resample(packets, total_dist_m, rate_hz=30.0)
-    positions    = compute_positions(norm_pts, track)
-    print(f"  {len(packets)} raw packets → {len(norm_pts)} resampled @ 30 Hz")
-
-    # ── Send to Rerun ──────────────────────────────────────────────────────
+    # ── Build and log each Q3 driver ──────────────────────────────────────
     viewer = Path(sys.executable).parent / "rerun"
     rr.init("f1_position_pipeline")
     rr.spawn(executable_path=str(viewer))
 
     circuit_info = session.get_circuit_info()
     log_track(track, circuit_info)
-    log_driver(positions, packets, norm_pts, [255, 136, 0], abbr)
+
+    print("Building driver positions …")
+    for drv_num in q3_drivers:
+        try:
+            drv_info = session.get_driver(drv_num)
+            abbr     = drv_info["Abbreviation"]
+            team     = drv_info.get("TeamName", "")
+            color    = driver_color(abbr, team)
+
+            lap          = session.laps.pick_drivers(drv_num).pick_fastest()
+            packets      = extract_car_packets(lap)
+            odometry     = build_odometry(packets)
+            total_dist_m = odometry[-1].distance_m
+            norm_pts     = resample(packets, total_dist_m, rate_hz=30.0)
+            positions    = compute_positions(norm_pts, track)
+
+            log_driver(positions, packets, norm_pts, color, abbr)
+            print(f"  {abbr}  {len(packets)} packets → {len(norm_pts)} @ 30 Hz  ({color})")
+        except Exception as e:
+            print(f"  {drv_num}: skipped ({e})")
+
     rr.send_blueprint(make_blueprint())
     print("Done — Rerun viewer should be open.")
 
