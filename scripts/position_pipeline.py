@@ -44,19 +44,12 @@ def log_track(track: TrackShape, circuit_info) -> None:
                        colors=[[255, 200, 0]] * len(corners), radii=10),
            static=True)
 
-    # Gap diagnostic — shows whether the track closes properly
-    start = np.array([track.x[0],  track.y[0]])
-    end   = np.array([track.x[-1], track.y[-1]])
-    gap_m = float(np.linalg.norm(end - start)) * 0.1
-    rr.log("track/gap/start",
+    # Show start/finish marker — all_points() closes the loop so this is just
+    # a reference marker, not a gap indicator
+    start = np.array([track.x[0], track.y[0]])
+    rr.log("track/start_finish",
            rr.Points2D([start], colors=[[0, 255, 0]], radii=20), static=True)
-    rr.log("track/gap/end",
-           rr.Points2D([end],   colors=[[255, 0, 0]], radii=20), static=True)
-    if gap_m > 0.1:
-        rr.log("track/gap/line",
-               rr.LineStrips2D([[start, end]], colors=[[255, 0, 0]], radii=3),
-               static=True)
-    print(f"  Gap at start/finish: {gap_m:.2f}m")
+    print(f"  Start/finish: ({start[0]:.0f}, {start[1]:.0f})")
 
 
 def log_driver(driver: DriverFrames) -> None:

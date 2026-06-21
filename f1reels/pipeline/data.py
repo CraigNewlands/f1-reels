@@ -87,6 +87,14 @@ def resample(
     dist_out = np.concatenate([[0.0], np.cumsum(dist_inc)])
 
     nd_out = np.clip(dist_out / total_dist_m, 0.0, 1.0)
+
+    # Append an explicit endpoint so the car always reaches norm_dist=1.0.
+    # np.arange stops ~33ms short of t_in[-1] and PCHIP integration gives
+    # slightly less distance than raw odometry, leaving the car 5-8m short
+    # of the start/finish without this.
+    t_out  = np.append(t_out,  t_in[-1])
+    nd_out = np.append(nd_out, 1.0)
+
     return [
         NormalisedPoint(norm_dist=float(nd), session_time_s=float(t))
         for nd, t in zip(nd_out, t_out)
@@ -144,13 +152,6 @@ def build_track_shape(
         nans = np.isnan(arr)
         if nans.any():
             arr[nans] = np.interp(t_bins[nans], t_bins[~nans], arr[~nans])
-
-    # Close the loop: GPS laps start just after the timing beacon and end just
-    # before it, so bin[0] and bin[-1] are physically close but not identical.
-    # Average them so the track starts and ends at the same point.
-    for arr in (x_med, y_med, z_med):
-        mid = (arr[0] + arr[-1]) / 2
-        arr[0] = arr[-1] = mid
 
     t_fine = np.linspace(0, n_bins - 1, n_out)
     x_out  = np.interp(t_fine, t_bins, x_med)

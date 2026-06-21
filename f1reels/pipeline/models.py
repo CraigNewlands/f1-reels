@@ -53,7 +53,10 @@ class TrackShape:
         )
 
     def all_points(self) -> np.ndarray:
-        return np.column_stack([self.x, self.y])
+        """Return X,Y points with the first point appended at the end to close
+        the loop visually — the circuit is a closed circuit."""
+        pts = np.column_stack([self.x, self.y])
+        return np.vstack([pts, pts[0]])
 
 
 @dataclass
