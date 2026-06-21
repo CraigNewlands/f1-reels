@@ -105,34 +105,28 @@ class MatplotlibRenderer:
             ax.set_facecolor(_BG)
             ax.axis("off")
 
-        # ── Static track base (dark road) ─────────────────────────────────
+        # ── Track lines — linewidths scaled each frame to match viewport ────
         segs = [[[track.x[i], track.y[i]], [track.x[i+1], track.y[i+1]]]
                 for i in range(n_segs)]
 
-        ax_track.add_collection(
-            LineCollection(segs, colors=["#111111"] * n_segs, linewidths=22, zorder=0))
+        base_lc = LineCollection(segs, colors=["#111111"] * n_segs, linewidths=22, zorder=0)
+        ax_track.add_collection(base_lc)
 
-        # Progressive colour layer — starts all grey, fills in during the lap
         colour_arr = np.tile(_GREY_SEG, (n_segs, 1)).astype(float)
         colour_lc  = LineCollection(segs, colors=colour_arr, linewidths=8, zorder=1)
         ax_track.add_collection(colour_lc)
 
-        # Thin white centre line on top
-        ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE, lw=1.5,
-                      solid_capstyle="round", alpha=0.5, zorder=2)
+        centre_line, = ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE, lw=1.5,
+                                     solid_capstyle="round", alpha=0.5, zorder=2)
 
-        # ── Start/finish line ──────────────────────────────────────────────
+        # ── Start/finish line — dynamic so length scales with viewport ────
         sf_x, sf_y = track.x[0], track.y[0]
         tdx = float(track.x[1] - track.x[-2])
         tdy = float(track.y[1] - track.y[-2])
         tn  = np.sqrt(tdx**2 + tdy**2)
         perp_x, perp_y = -tdy / tn, tdx / tn
-        sf_half = max(x_rng, y_rng) * 0.008  # narrow dash, ~0.8% of track extent
-        ax_track.plot(
-            [sf_x - perp_x * sf_half, sf_x + perp_x * sf_half],
-            [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
-            color=_WHITE, lw=2.5, zorder=2,
-        )
+        sf_frac = 0.04   # start/finish half-length as fraction of current viewport radius
+        sf_line, = ax_track.plot([], [], color=_WHITE, lw=2.5, zorder=2)
 
         ax_track.set_aspect("equal")
         ax_track.set_xlim(full_cx - full_r, full_cx + full_r)
@@ -203,9 +197,23 @@ class MatplotlibRenderer:
             ax_track.set_xlim(cx - r, cx + r)
             ax_track.set_ylim(cy - r, cy + r)
 
+            # Scale all line widths with the viewport so nothing looks
+            # disproportionately thick or thin during the zoom-out
+            scale = zoom_r / r          # 1.0 when fully zoomed in, <1 when zoomed out
+            base_lc.set_linewidth(22 * scale)
+            colour_lc.set_linewidth(max(8 * scale, 1.5))
+            centre_line.set_linewidth(max(1.5 * scale, 0.4))
+
+            # Start/finish line length tracks viewport so it stays visible
+            sf_half = r * sf_frac
+            sf_line.set_data(
+                [sf_x - perp_x * sf_half, sf_x + perp_x * sf_half],
+                [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
+            )
+            sf_line.set_linewidth(max(2.5 * scale, 0.8))
+
             # Update label offset to match current viewport scale
-            current_y_span = 2 * r
-            _lbl_dy[0] = current_y_span * 0.012
+            _lbl_dy[0] = r * 0.024
 
             # ── Leaderboard ───────────────────────────────────────────────
             ax_board.cla()
