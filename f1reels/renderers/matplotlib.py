@@ -84,7 +84,7 @@ class MatplotlibRenderer:
         ax_track.plot(
             [sf_x - perp_x * half, sf_x + perp_x * half],
             [sf_y - perp_y * half, sf_y + perp_y * half],
-            color=_WHITE, lw=2.5, zorder=6,
+            color=_WHITE, lw=2.5, zorder=2,   # under the car dots (zorder 3-5)
         )
 
         # ── Driver dots (one per driver) ──────────────────────────────────
@@ -155,17 +155,20 @@ class MatplotlibRenderer:
                               color=drv.color, fontsize=11, fontweight="bold",
                               va="center", fontfamily="monospace")
                 if rank == 0 and all_finished:
-                    # Leader: show full lap time when race is over
+                    # Leader: show full official lap time when everyone has finished
                     m   = int(leader_laptime // 60)
                     sec = leader_laptime % 60
                     ax_board.text(0.42, row_y, f"{m}:{sec:06.3f}",
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
                 elif rank > 0:
-                    if drv in finished:
-                        gap_s = drv.official_laptime_s - leader_laptime
-                    else:
-                        leader_nd = ranked[0].at(t)[2]
-                        gap_s = (leader_nd - nd) * max_lap_s
+                    # Sector-delta gap: how many seconds behind is this driver at
+                    # the leader's current track position?
+                    # t_leader_here ≈ t (leader is there now), but use interp for
+                    # accuracy when leader is at nd=1.0 (finished).
+                    nd_leader  = ranked[0].at(t)[2]
+                    t_leader   = ranked[0].time_at_norm_dist(nd_leader)
+                    t_trailer  = drv.time_at_norm_dist(nd_leader)
+                    gap_s      = max(t_trailer - t_leader, 0.0)
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
 

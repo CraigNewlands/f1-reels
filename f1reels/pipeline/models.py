@@ -100,3 +100,12 @@ class DriverFrames:
             float(np.interp(t, self._t, self._y)),
             float(np.interp(t, self._t, self._nd)),
         )
+
+    def time_at_norm_dist(self, nd: float) -> float:
+        """Return the lap time (seconds) when this driver was/will be at norm_dist nd.
+
+        Uses the full pre-computed position series so it works for positions the
+        driver hasn't reached yet in the animation — giving the correct prospective
+        gap rather than the inaccurate distance-based estimate.
+        """
+        return float(np.interp(nd, self._nd, self._t))
