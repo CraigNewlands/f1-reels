@@ -91,8 +91,8 @@ class MatplotlibRenderer:
         full_cy = (y_min + y_max) / 2
         full_r  = max(x_rng, y_rng) / 2 * (1 + pad)
 
-        # Zoomed viewport radius (≈ 18 % of max track dimension)
-        zoom_r = max(x_rng, y_rng) * 0.18
+        # Zoomed viewport radius (≈ 12 % of max track dimension)
+        zoom_r = max(x_rng, y_rng) * 0.12
 
         # ── Figure ─────────────────────────────────────────────────────────
         fig = plt.figure(figsize=(_W, _H), facecolor=_BG, dpi=_DPI)
