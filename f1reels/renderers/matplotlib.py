@@ -71,6 +71,22 @@ class MatplotlibRenderer:
         ax_track.autoscale_view()
         ax_track.set_autoscale_on(False)
 
+        # ── Start/finish line ─────────────────────────────────────────────
+        # Perpendicular to the track direction at the start/finish point
+        sf_x, sf_y = track.x[0], track.y[0]
+        dx = float(track.x[1] - track.x[-2])
+        dy = float(track.y[1] - track.y[-2])
+        norm = np.sqrt(dx**2 + dy**2)
+        dx, dy = dx / norm, dy / norm          # unit vector along track
+        perp_x, perp_y = -dy, dx               # perpendicular
+        x_rng = pts[:, 0].max() - pts[:, 0].min()
+        half  = x_rng * 0.025                  # line half-length ~2.5% of track width
+        ax_track.plot(
+            [sf_x - perp_x * half, sf_x + perp_x * half],
+            [sf_y - perp_y * half, sf_y + perp_y * half],
+            color=_WHITE, lw=2.5, zorder=6,
+        )
+
         # ── Driver dots (one per driver) ──────────────────────────────────
         dot_artists = {}
         for drv in drivers:
@@ -87,11 +103,6 @@ class MatplotlibRenderer:
         y_rng = pts[:, 1].max() - pts[:, 1].min()
         lbl_dy = y_rng * 0.015
 
-        # ── Progress bar (drawn once, filled each frame) ──────────────────
-        ax_board.set_xlim(0, 1)
-        ax_board.set_ylim(0, 1)
-        bar_bg = ax_board.barh(0.08, 0.90, height=0.10, left=0.05, color="#1e1e1e")[0]
-        bar_fg = ax_board.barh(0.08, 0.00, height=0.10, left=0.05, color="#3a3a3a")[0]
 
         def animate(frame: int) -> None:
             t = (frame / max(total_frames - 1, 1)) * max_lap_s
@@ -158,10 +169,6 @@ class MatplotlibRenderer:
                     ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
                                   color=_MID, fontsize=8, va="center", fontfamily="monospace")
 
-            # Progress bar
-            progress = frame / max(total_frames - 1, 1)
-            ax_board.barh(0.08, 0.90, height=0.10, left=0.05, color="#1e1e1e")
-            ax_board.barh(0.08, 0.90 * progress, height=0.10, left=0.05, color="#3a3a3a")
 
             if progress_cb is not None:
                 progress_cb(frame + 1, total_frames)
