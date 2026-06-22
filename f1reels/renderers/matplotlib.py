@@ -144,11 +144,9 @@ class MatplotlibRenderer:
             halo, = ax_track.plot([], [], "o", color=drv.color, markersize=22, alpha=0.20, zorder=3)
             dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=16,
                                   markeredgecolor=_WHITE, markeredgewidth=1.5, zorder=4)
-            lbl   = ax_track.text(0, 0, drv.abbr, color=_WHITE,
+            lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
                                   fontsize=11, fontweight="bold",
-                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5,
-                                  bbox=dict(boxstyle="round,pad=0.15", facecolor=drv.color,
-                                            edgecolor="none", alpha=0.92))
+                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5)
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
