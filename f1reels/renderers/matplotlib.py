@@ -140,14 +140,14 @@ class MatplotlibRenderer:
         # ── Driver dots ───────────────────────────────────────────────────
         dot_artists = {}
         for drv in drivers:
-            halo, = ax_track.plot([], [], "o", color=drv.color, markersize=16, alpha=0.20, zorder=3)
-            dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=12,
-                                  markeredgecolor=_WHITE, markeredgewidth=1.0, zorder=4)
-            lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
-                                  fontsize=8, fontweight="bold",
-                                  ha="center", va="bottom", fontfamily="monospace", zorder=5,
-                                  bbox=dict(boxstyle="round,pad=0.15", facecolor=_BG,
-                                            edgecolor="none", alpha=0.75))
+            halo, = ax_track.plot([], [], "o", color=drv.color, markersize=22, alpha=0.20, zorder=3)
+            dot,  = ax_track.plot([], [], "o", color=drv.color, markersize=16,
+                                  markeredgecolor=_WHITE, markeredgewidth=1.5, zorder=4)
+            lbl   = ax_track.text(0, 0, drv.abbr, color=_WHITE,
+                                  fontsize=14, fontweight="black",
+                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5,
+                                  bbox=dict(boxstyle="round,pad=0.2", facecolor=drv.color,
+                                            edgecolor="none", alpha=0.92))
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
@@ -234,25 +234,25 @@ class MatplotlibRenderer:
             leader_lt    = finished[0].official_laptime_s if finished else None
 
             n       = len(ranked)
-            row_gap = min(0.18, 0.65 / max(n - 1, 1))
+            row_gap = min(0.22, 0.70 / max(n - 1, 1))
             for rank, drv in enumerate(ranked):
                 row_y = 0.88 - rank * row_gap
-                ax_board.text(0.04, row_y, str(rank + 1),
-                              color=_DIM, fontsize=9, fontweight="bold",
-                              va="center", fontfamily="monospace")
-                ax_board.plot([0.10], [row_y], "o", color=drv.color, markersize=10, zorder=5)
-                ax_board.text(0.15, row_y, drv.abbr,
-                              color=drv.color, fontsize=11, fontweight="bold",
-                              va="center", fontfamily="monospace")
+                ax_board.text(0.03, row_y, str(rank + 1),
+                              color=_DIM, fontsize=15, fontweight="bold",
+                              va="center", fontfamily="sans-serif")
+                ax_board.plot([0.12], [row_y], "o", color=drv.color, markersize=14, zorder=5)
+                ax_board.text(0.19, row_y, drv.abbr,
+                              color=drv.color, fontsize=18, fontweight="black",
+                              va="center", fontfamily="sans-serif")
                 if rank == 0 and all_finished:
-                    ax_board.text(0.42, row_y, _fmt_laptime(leader_lt),
-                                  color=_MID, fontsize=8, va="center", fontfamily="monospace")
+                    ax_board.text(0.50, row_y, _fmt_laptime(leader_lt),
+                                  color=_MID, fontsize=15, va="center", fontfamily="sans-serif")
                 elif rank > 0:
                     nd_ldr = ranked[0].at(t)[2]
                     gap_s  = max(drv.time_at_norm_dist(nd_ldr)
                                  - ranked[0].time_at_norm_dist(nd_ldr), 0.0)
-                    ax_board.text(0.42, row_y, f"+{gap_s:.3f}s",
-                                  color=_MID, fontsize=8, va="center", fontfamily="monospace")
+                    ax_board.text(0.50, row_y, f"+{gap_s:.3f}s",
+                                  color=_MID, fontsize=15, va="center", fontfamily="sans-serif")
 
             if progress_cb is not None:
                 progress_cb(frame + 1, total_frames)
@@ -260,11 +260,11 @@ class MatplotlibRenderer:
         # ── Top label ─────────────────────────────────────────────────────
         ax_top.set_xlim(0, 1)
         ax_top.set_ylim(0, 1)
-        ax_top.text(0.5, 0.65, "Q LAP COMPARISON",
-                    color=_WHITE, fontsize=12, fontweight="bold",
-                    ha="center", va="center", fontfamily="monospace")
-        ax_top.text(0.5, 0.25, f"TOP {len(drivers)}  ·  Q3",
-                    color=_DIM, fontsize=8, ha="center", va="center", fontfamily="monospace")
+        ax_top.text(0.5, 0.68, "Q LAP COMPARISON",
+                    color=_WHITE, fontsize=20, fontweight="black",
+                    ha="center", va="center", fontfamily="sans-serif")
+        ax_top.text(0.5, 0.22, f"TOP {len(drivers)}  ·  Q3",
+                    color=_DIM, fontsize=13, ha="center", va="center", fontfamily="sans-serif")
 
         # ── Render ────────────────────────────────────────────────────────
         anim   = FuncAnimation(fig, animate, frames=total_frames, interval=1000 / fps)
