@@ -72,15 +72,21 @@ class MatplotlibRenderer:
         max_lap_s    = max(d.lap_time_s for d in drivers)
         leader       = min(drivers, key=lambda d: d.official_laptime_s)
 
-        # ── Pre-compute per-segment "fastest driver" colours ──────────────
-        n_segs     = len(track.x) - 1
-        nd_mids    = (np.arange(n_segs) + 0.5) / n_segs
+        # ── Smooth track geometry — cubic spline at 10 000 points ─────────
+        # The raw 2001-point polygon shows straight-line segments at corners
+        # when zoomed in.  A periodic cubic spline curves smoothly between
+        # the same points without moving them.
+        sx, sy  = track.smooth_points(n=10_000)
+        n_segs  = len(sx) - 1
+        nd_mids = (np.arange(n_segs) + 0.5) / n_segs
+
+        # Per-segment "fastest driver" colours on the fine grid
         final_rgba = np.array([
             _hex_to_rgba(min(drivers, key=lambda d: d.time_at_norm_dist(float(nd))).color)
             for nd in nd_mids
         ])  # shape (n_segs, 4)
 
-        # ── Track geometry ─────────────────────────────────────────────────
+        # ── Track geometry bounds (from raw points, unaffected by spline) ──
         pts     = track.all_points()
         x_min, x_max = pts[:, 0].min(), pts[:, 0].max()
         y_min, y_max = pts[:, 1].min(), pts[:, 1].max()
@@ -106,12 +112,9 @@ class MatplotlibRenderer:
             ax.set_facecolor(_BG)
             ax.axis("off")
 
-        # ── Track lines — linewidths scaled each frame to match viewport ────
-        segs = [[[track.x[i], track.y[i]], [track.x[i+1], track.y[i+1]]]
-                for i in range(n_segs)]
+        # ── Track lines — built from smooth spline points ─────────────────
+        segs = [[[sx[i], sy[i]], [sx[i + 1], sy[i + 1]]] for i in range(n_segs)]
 
-        # capstyle='round' makes each segment end a half-circle so consecutive
-        # segments blend together at corners — eliminates the black triangle gaps
         base_lc = LineCollection(segs, colors=["#111111"] * n_segs,
                                  linewidths=22, capstyle="round", zorder=0)
         ax_track.add_collection(base_lc)
@@ -121,7 +124,7 @@ class MatplotlibRenderer:
                                     linewidths=8, capstyle="round", zorder=1)
         ax_track.add_collection(colour_lc)
 
-        centre_line, = ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE, lw=1.5,
+        centre_line, = ax_track.plot(sx, sy, color=_WHITE, lw=1.5,
                                      solid_capstyle="round", alpha=0.5, zorder=2)
 
         # ── Start/finish line — dynamic so length scales with viewport ────

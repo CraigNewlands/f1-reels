@@ -55,6 +55,18 @@ class TrackShape:
     def all_points(self) -> np.ndarray:
         return np.column_stack([self.x, self.y])
 
+    def smooth_points(self, n: int = 10_000) -> tuple[np.ndarray, np.ndarray]:
+        """Fit a cubic spline through all 2001 track points and evaluate at n
+        evenly-spaced positions.  Returns (x, y) arrays of length n+1.
+        Gives smooth curves at corners instead of the visible polygon segments
+        — track positions are unchanged, only the interpolation between them."""
+        from scipy.interpolate import CubicSpline
+        t = np.linspace(0, 1, len(self.x))   # 2001 knots including closing point
+        cs_x = CubicSpline(t, self.x)
+        cs_y = CubicSpline(t, self.y)
+        t_fine = np.linspace(0, 1, n + 1)
+        return cs_x(t_fine), cs_y(t_fine)
+
 
 @dataclass
 class CarPositionAtTime:
