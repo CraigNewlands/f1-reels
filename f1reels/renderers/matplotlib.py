@@ -28,8 +28,8 @@ _GREY_SEG = (0.25, 0.25, 0.25, 0.6)   # unvisited track segment colour
 _RATIOS = [0.07, 0.73, 0.20]
 
 # Fixed durations for zoom-out animation and full-track hold
-_ZOOM_ANIM_S = 3.0   # seconds for the zoom-out animation
-_HOLD_S      = 1.0   # seconds to hold the full coloured circuit
+_ZOOM_ANIM_S = 2.0   # seconds for the zoom-out animation
+_HOLD_S      = 0.0   # seconds to hold the full coloured circuit
 
 
 def _hex_to_rgba(h: str, alpha: float = 1.0) -> tuple:
