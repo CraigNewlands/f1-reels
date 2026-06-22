@@ -212,7 +212,7 @@ class MatplotlibRenderer:
                 [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
             )
 
-            _lbl_dy[0] = r * 0.05
+            _lbl_dy[0] = r * 0.03
 
             # ── Leaderboard ───────────────────────────────────────────────
             ax_board.cla()
