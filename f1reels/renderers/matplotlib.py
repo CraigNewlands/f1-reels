@@ -246,8 +246,9 @@ class MatplotlibRenderer:
                 ax_board.text(0.19, row_y, drv.abbr,
                               color=drv.color, fontsize=18, fontweight="black",
                               va="center", fontfamily="sans-serif")
-                if rank == 0 and all_finished:
-                    ax_board.text(0.50, row_y, _fmt_laptime(leader_lt),
+                if rank == 0:
+                    label = _fmt_laptime(leader_lt) if all_finished else "LEADER"
+                    ax_board.text(0.50, row_y, label,
                                   color=_MID, fontsize=15, va="center", fontfamily="sans-serif")
                 elif rank > 0:
                     nd_ldr = ranked[0].at(t)[2]
