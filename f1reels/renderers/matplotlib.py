@@ -148,7 +148,7 @@ class MatplotlibRenderer:
                                   fontsize=11, fontweight="bold",
                                   ha="center", va="bottom", fontfamily="sans-serif", zorder=5,
                                   bbox=dict(boxstyle="round,pad=0.15", facecolor=drv.color,
-                                            edgecolor="none", alpha=0.55))
+                                            edgecolor="none", alpha=0.92))
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
