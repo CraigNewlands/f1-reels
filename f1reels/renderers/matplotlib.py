@@ -109,11 +109,15 @@ class MatplotlibRenderer:
         segs = [[[track.x[i], track.y[i]], [track.x[i+1], track.y[i+1]]]
                 for i in range(n_segs)]
 
-        base_lc = LineCollection(segs, colors=["#111111"] * n_segs, linewidths=22, zorder=0)
+        # capstyle='round' makes each segment end a half-circle so consecutive
+        # segments blend together at corners — eliminates the black triangle gaps
+        base_lc = LineCollection(segs, colors=["#111111"] * n_segs,
+                                 linewidths=22, capstyle="round", zorder=0)
         ax_track.add_collection(base_lc)
 
         colour_arr = np.tile(_GREY_SEG, (n_segs, 1)).astype(float)
-        colour_lc  = LineCollection(segs, colors=colour_arr, linewidths=8, zorder=1)
+        colour_lc  = LineCollection(segs, colors=colour_arr,
+                                    linewidths=8, capstyle="round", zorder=1)
         ax_track.add_collection(colour_lc)
 
         centre_line, = ax_track.plot(pts[:, 0], pts[:, 1], color=_WHITE, lw=1.5,
