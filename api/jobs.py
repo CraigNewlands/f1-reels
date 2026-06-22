@@ -21,6 +21,29 @@ from f1reels.renderers import get_renderer
 from .schemas import RenderRequest
 
 
+def _lighten(hex_color: str, factor: float) -> str:
+    """Blend hex_color toward white by factor (0=unchanged, 1=white)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _resolve_colour_conflicts(drivers) -> None:
+    """When two drivers share the same team colour, lighten the later one(s)
+    so their track segments and dots remain visually distinct."""
+    from collections import defaultdict
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, drv in enumerate(drivers):
+        groups[drv.color].append(i)
+    for indices in groups.values():
+        if len(indices) > 1:
+            for rank, idx in enumerate(indices[1:], 1):
+                drivers[idx].color = _lighten(drivers[idx].color, 0.40 * rank)
+
+
 @dataclass
 class Job:
     id: str
@@ -110,6 +133,10 @@ def _run_render(job_id: str, req: RenderRequest) -> None:
 
         if not drivers:
             raise ValueError("No driver data could be loaded.")
+
+        # Resolve colour conflicts: when two drivers share a team colour,
+        # lighten subsequent drivers' colours so segments are distinguishable
+        _resolve_colour_conflicts(drivers)
 
         renderer = get_renderer(req.renderer)
 
