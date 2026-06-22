@@ -7,7 +7,7 @@ class RenderRequest(BaseModel):
     session_type: str = Field("Q", example="Q")
     renderer: str = Field("matplotlib", example="matplotlib")
     fps: int = Field(30, ge=1, le=120)
-    duration_s: float = Field(45.0, gt=0, le=300)
+    duration_s: float = Field(30.0, gt=0, le=300)
     drivers: list[str] | None = Field(
         None,
         description="Driver abbreviations to include. None = all Q3 drivers.",
