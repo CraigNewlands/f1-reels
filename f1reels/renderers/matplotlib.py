@@ -170,6 +170,10 @@ class MatplotlibRenderer:
                 t             = max_lap_s
                 zoom_progress = 1.0   # hold full track
 
+            # Pre-compute viewport radius so it's available throughout this frame
+            z_s = _smoothstep(zoom_progress)
+            r   = zoom_r + (full_r - zoom_r) * z_s
+
             # ── Reveal coloured segments up to leader's current position ──
             nd_now     = leader.at(t)[2]
             reveal_idx = min(int(nd_now * n_segs), n_segs)
@@ -182,13 +186,26 @@ class MatplotlibRenderer:
             ordered  = sorted(drivers,
                                key=lambda d: (d.at(t)[2], -d.official_laptime_s))
             leader_x = leader_y = 0.0
+            # Gather all positions to detect close pairs and stagger labels
+            positions_xy = {drv.abbr: drv.at(t)[:2] for drv in ordered}
+            close_thresh = r * 0.12   # drivers within this are "close"
+
             for rank, drv in enumerate(ordered):
-                x, y, _ = drv.at(t)
+                x, y = positions_xy[drv.abbr]
                 halo, dot, lbl = dot_artists[drv.abbr]
-                z = 10 + rank * 3   # last entry = leader = highest z = drawn on top
+                z = 10 + rank * 3
                 halo.set_data([x], [y]); halo.set_zorder(z)
                 dot.set_data([x], [y]);  dot.set_zorder(z + 1)
-                lbl.set_position((x, y + _lbl_dy[0])); lbl.set_zorder(z + 2)
+
+                # Count how many higher-ranked (lower z) drivers are close;
+                # shift this label up by one extra step per close neighbour
+                extra = sum(
+                    1 for other in ordered[:rank]
+                    if np.hypot(positions_xy[other.abbr][0] - x,
+                                positions_xy[other.abbr][1] - y) < close_thresh
+                )
+                lbl.set_position((x, y + _lbl_dy[0] + extra * _lbl_dy[0] * 1.4))
+                lbl.set_zorder(z + 2)
                 if drv is leader:
                     leader_x, leader_y = x, y
 
@@ -196,10 +213,8 @@ class MatplotlibRenderer:
             _last_leader_pos[1] = leader_y
 
             # ── Camera ────────────────────────────────────────────────────
-            z = _smoothstep(zoom_progress)
-            cx = leader_x + (full_cx - leader_x) * z
-            cy = leader_y + (full_cy - leader_y) * z
-            r  = zoom_r   + (full_r  - zoom_r)   * z
+            cx = leader_x + (full_cx - leader_x) * z_s
+            cy = leader_y + (full_cy - leader_y) * z_s
 
             ax_track.set_xlim(cx - r, cx + r)
             ax_track.set_ylim(cy - r, cy + r)
@@ -212,8 +227,8 @@ class MatplotlibRenderer:
                 [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
             )
 
-            # Update label offset to match current viewport scale
-            _lbl_dy[0] = r * 0.024
+            # Base label offset — clear of the dot in screen space
+            _lbl_dy[0] = r * 0.07
 
             # ── Leaderboard ───────────────────────────────────────────────
             ax_board.cla()
