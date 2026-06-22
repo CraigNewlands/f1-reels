@@ -72,22 +72,17 @@ class MatplotlibRenderer:
         max_lap_s    = max(d.lap_time_s for d in drivers)
         leader       = min(drivers, key=lambda d: d.official_laptime_s)
 
-        # ── Smooth track geometry — cubic spline at 10 000 points ─────────
-        # The raw 2001-point polygon shows straight-line segments at corners
-        # when zoomed in.  A periodic cubic spline curves smoothly between
-        # the same points without moving them.
-        sx, sy  = track.smooth_points(n=10_000)
-        n_segs  = len(sx) - 1
+        # ── Track geometry — now cubic-spline-smooth from build_track_shape ─
+        pts    = track.all_points()   # 2001 points, corners already curved
+        sx, sy = pts[:, 0], pts[:, 1]
+        n_segs = len(sx) - 1
         nd_mids = (np.arange(n_segs) + 0.5) / n_segs
 
-        # Per-segment "fastest driver" colours on the fine grid
         final_rgba = np.array([
             _hex_to_rgba(min(drivers, key=lambda d: d.time_at_norm_dist(float(nd))).color)
             for nd in nd_mids
-        ])  # shape (n_segs, 4)
+        ])
 
-        # ── Track geometry bounds (from raw points, unaffected by spline) ──
-        pts     = track.all_points()
         x_min, x_max = pts[:, 0].min(), pts[:, 0].max()
         y_min, y_max = pts[:, 1].min(), pts[:, 1].max()
         x_rng, y_rng = x_max - x_min, y_max - y_min
@@ -126,6 +121,7 @@ class MatplotlibRenderer:
 
         centre_line, = ax_track.plot(sx, sy, color=_WHITE, lw=1.5,
                                      solid_capstyle="round", alpha=0.5, zorder=2)
+
 
         # ── Start/finish line — dynamic so length scales with viewport ────
         sf_x, sf_y = track.x[0], track.y[0]

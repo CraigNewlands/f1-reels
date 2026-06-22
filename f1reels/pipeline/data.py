@@ -153,10 +153,17 @@ def build_track_shape(
         if nans.any():
             arr[nans] = np.interp(t_bins[nans], t_bins[~nans], arr[~nans])
 
+    # Cubic spline between the 500 median bins so corners curve smoothly
+    # rather than connecting bins with straight lines (linear interp gives
+    # visible polygon edges at tight corners when zoomed in).
+    from scipy.interpolate import CubicSpline
+    cs_x   = CubicSpline(t_bins, x_med)
+    cs_y   = CubicSpline(t_bins, y_med)
+    cs_z   = CubicSpline(t_bins, z_med)
     t_fine = np.linspace(0, n_bins - 1, n_out)
-    x_out  = np.interp(t_fine, t_bins, x_med)
-    y_out  = np.interp(t_fine, t_bins, y_med)
-    z_out  = np.interp(t_fine, t_bins, z_med)
+    x_out  = cs_x(t_fine)
+    y_out  = cs_y(t_fine)
+    z_out  = cs_z(t_fine)
 
     # Close the loop BEFORE arc-length re-parameterisation.
     # GPS laps start/end near the timing beacon with a ~10m gap. Appending
