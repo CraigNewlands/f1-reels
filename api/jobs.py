@@ -129,6 +129,7 @@ def _run_render(job_id: str, req: RenderRequest) -> None:
             fps=req.fps,
             duration_s=req.duration_s,
             progress_cb=progress_cb,
+            event_name=session.event["EventName"],
         )
 
         job.update(status="done", progress=1.0, output_path=str(output))

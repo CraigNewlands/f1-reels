@@ -59,6 +59,7 @@ class MatplotlibRenderer:
         fps: int = 30,
         duration_s: float = 45.0,
         progress_cb: Callable[[int, int], None] | None = None,
+        event_name: str = "",
     ) -> Path:
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg not found in PATH — brew install ffmpeg")
@@ -91,8 +92,8 @@ class MatplotlibRenderer:
         full_cy = (y_min + y_max) / 2
         full_r  = max(x_rng, y_rng) / 2 * (1 + pad)
 
-        # Zoomed viewport radius (≈ 12 % of max track dimension)
-        zoom_r = max(x_rng, y_rng) * 0.12
+        # Zoomed viewport radius (≈ 8 % of max track dimension)
+        zoom_r = max(x_rng, y_rng) * 0.08
 
         # ── Figure ─────────────────────────────────────────────────────────
         fig = plt.figure(figsize=(_W, _H), facecolor=_BG, dpi=_DPI)
@@ -260,10 +261,11 @@ class MatplotlibRenderer:
         # ── Top label ─────────────────────────────────────────────────────
         ax_top.set_xlim(0, 1)
         ax_top.set_ylim(0, 1)
-        ax_top.text(0.5, 0.68, "Q LAP COMPARISON",
+        title = event_name.upper() if event_name else "GRAND PRIX"
+        ax_top.text(0.5, 0.70, title,
                     color=_WHITE, fontsize=20, fontweight="black",
                     ha="center", va="center", fontfamily="sans-serif")
-        ax_top.text(0.5, 0.22, f"TOP {len(drivers)}  ·  Q3",
+        ax_top.text(0.5, 0.20, f"QUALIFYING  ·  TOP {len(drivers)}",
                     color=_DIM, fontsize=13, ha="center", va="center", fontfamily="sans-serif")
 
         # ── Render ────────────────────────────────────────────────────────
