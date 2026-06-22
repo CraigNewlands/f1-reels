@@ -186,26 +186,13 @@ class MatplotlibRenderer:
             ordered  = sorted(drivers,
                                key=lambda d: (d.at(t)[2], -d.official_laptime_s))
             leader_x = leader_y = 0.0
-            # Gather all positions to detect close pairs and stagger labels
-            positions_xy = {drv.abbr: drv.at(t)[:2] for drv in ordered}
-            close_thresh = r * 0.12   # drivers within this are "close"
-
             for rank, drv in enumerate(ordered):
-                x, y = positions_xy[drv.abbr]
+                x, y, _ = drv.at(t)
                 halo, dot, lbl = dot_artists[drv.abbr]
                 z = 10 + rank * 3
                 halo.set_data([x], [y]); halo.set_zorder(z)
                 dot.set_data([x], [y]);  dot.set_zorder(z + 1)
-
-                # Count how many higher-ranked (lower z) drivers are close;
-                # shift this label up by one extra step per close neighbour
-                extra = sum(
-                    1 for other in ordered[:rank]
-                    if np.hypot(positions_xy[other.abbr][0] - x,
-                                positions_xy[other.abbr][1] - y) < close_thresh
-                )
-                lbl.set_position((x, y + _lbl_dy[0] + extra * _lbl_dy[0] * 1.4))
-                lbl.set_zorder(z + 2)
+                lbl.set_position((x, y + _lbl_dy[0])); lbl.set_zorder(z + 2)
                 if drv is leader:
                     leader_x, leader_y = x, y
 
@@ -227,8 +214,7 @@ class MatplotlibRenderer:
                 [sf_y - perp_y * sf_half, sf_y + perp_y * sf_half],
             )
 
-            # Base label offset — clear of the dot in screen space
-            _lbl_dy[0] = r * 0.07
+            _lbl_dy[0] = r * 0.05
 
             # ── Leaderboard ───────────────────────────────────────────────
             ax_board.cla()
