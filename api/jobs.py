@@ -94,21 +94,22 @@ def _run_render(job_id: str, req: RenderRequest) -> None:
         session = fastf1.get_session(req.year, req.round_name, req.session_type)
         session.load()
 
-        # Collect GPS fixes from ALL timed laps across all drivers / all sessions
-        # (Q1 + Q2 + Q3 for all 20 drivers).  More laps → more fixes per bin →
-        # median is a stronger outlier filter → cleaner track shape.
+        # Use each driver's single fastest lap across all 20 drivers.
+        # Fastest laps are guaranteed hot laps — no outlaps, no pit lane sections.
+        # All 20 drivers gives ~3x more fixes per bin than Q3-only.
         all_fixes = []
-        valid_laps = session.laps[session.laps["LapTime"].notna()].reset_index(drop=True)
-        for idx in range(len(valid_laps)):
+        all_drivers = session.results["DriverNumber"].tolist()
+        for drv_num in all_drivers:
             try:
-                fixes = extract_gps_fixes(valid_laps.iloc[idx])
+                lap   = session.laps.pick_drivers(drv_num).pick_fastest()
+                fixes = extract_gps_fixes(lap)
                 if fixes:
                     all_fixes.append(fixes)
             except Exception:
                 pass
 
         total_fixes = sum(len(f) for f in all_fixes)
-        print(f"  {len(all_fixes)} laps → {total_fixes} GPS fixes for track shape")
+        print(f"  {len(all_fixes)} fastest laps → {total_fixes} GPS fixes for track shape")
         track = build_track_shape(all_fixes)
 
         q3_results = session.results[session.results["Q3"].notna()]
