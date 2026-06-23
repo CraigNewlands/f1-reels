@@ -232,27 +232,72 @@ class MatplotlibRenderer:
             all_finished = len(racing) == 0
             leader_lt    = finished[0].official_laptime_s if finished else None
 
-            n       = len(ranked)
-            row_gap = min(0.22, 0.70 / max(n - 1, 1))
+            n = len(ranked)
+            # Table geometry
+            col_pos   = 0.02   # left edge of position col
+            col_drv   = 0.22   # left edge of driver col
+            col_gap   = 0.62   # left edge of gap col
+            hdr_y     = 0.92   # header row centre
+            row_h     = 0.72 / max(n, 1)   # height per data row
+            row_tops  = [0.82 - i * row_h for i in range(n)]  # top of each row
+
+            # Column headers
+            for label, x in [("POS", col_pos), ("DRIVER", col_drv), ("GAP", col_gap)]:
+                ax_board.text(x, hdr_y, label, color=_DIM, fontsize=9,
+                              fontweight="bold", va="center", fontfamily="sans-serif")
+            # Header divider
+            ax_board.axhline(hdr_y - 0.06, color=_DIM, lw=0.6, alpha=0.6)
+
             for rank, drv in enumerate(ranked):
-                row_y = 0.88 - rank * row_gap
-                ax_board.text(0.03, row_y, str(rank + 1),
-                              color=_DIM, fontsize=15, fontweight="bold",
+                cy = row_tops[rank] - row_h / 2   # row centre y
+
+                # Alternating subtle row background
+                row_bg = 0.06 if rank % 2 == 0 else 0.04
+                ax_board.barh(cy, 0.96, height=row_h * 0.95, left=0.02,
+                              color=[row_bg] * 3, zorder=0)
+
+                # Coloured left stripe (team colour, 1.2% wide)
+                ax_board.barh(cy, 0.012, height=row_h * 0.95, left=0.002,
+                              color=drv.color, zorder=1)
+
+                # Position number
+                ax_board.text(col_pos + 0.08, cy, str(rank + 1),
+                              color=_WHITE, fontsize=14, fontweight="black",
+                              va="center", ha="center", fontfamily="sans-serif")
+
+                # Vertical divider after position
+                ax_board.axvline(col_drv - 0.02, ymin=(cy - row_h * 0.4 + 0) / 1.0,
+                                 ymax=(cy + row_h * 0.4) / 1.0,
+                                 color=_DIM, lw=0.4, alpha=0.4)
+
+                # Driver abbreviation
+                ax_board.text(col_drv + 0.01, cy, drv.abbr,
+                              color=drv.color, fontsize=16, fontweight="black",
                               va="center", fontfamily="sans-serif")
-                ax_board.plot([0.12], [row_y], "o", color=drv.color, markersize=14, zorder=5)
-                ax_board.text(0.19, row_y, drv.abbr,
-                              color=drv.color, fontsize=18, fontweight="black",
-                              va="center", fontfamily="sans-serif")
+
+                # Vertical divider before gap
+                ax_board.axvline(col_gap - 0.02,
+                                 ymin=(cy - row_h * 0.4) / 1.0,
+                                 ymax=(cy + row_h * 0.4) / 1.0,
+                                 color=_DIM, lw=0.4, alpha=0.4)
+
+                # Gap / laptime
                 if rank == 0:
-                    label = _fmt_laptime(leader_lt) if all_finished else "LEADER"
-                    ax_board.text(0.50, row_y, label,
-                                  color=_MID, fontsize=15, va="center", fontfamily="sans-serif")
-                elif rank > 0:
+                    gap_label = _fmt_laptime(leader_lt) if all_finished else "LEADER"
+                    gap_color = _WHITE
+                else:
                     nd_ldr = ranked[0].at(t)[2]
                     gap_s  = max(drv.time_at_norm_dist(nd_ldr)
                                  - ranked[0].time_at_norm_dist(nd_ldr), 0.0)
-                    ax_board.text(0.50, row_y, f"+{gap_s:.3f}s",
-                                  color=_MID, fontsize=15, va="center", fontfamily="sans-serif")
+                    gap_label = f"+{gap_s:.3f}s"
+                    gap_color = _MID
+                ax_board.text(col_gap + 0.01, cy, gap_label,
+                              color=gap_color, fontsize=13, fontweight="bold",
+                              va="center", fontfamily="sans-serif")
+
+                # Row bottom divider
+                ax_board.axhline(row_tops[rank] - row_h,
+                                 color=_DIM, lw=0.4, alpha=0.35)
 
             if progress_cb is not None:
                 progress_cb(frame + 1, total_frames)
