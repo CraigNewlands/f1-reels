@@ -259,7 +259,7 @@ class MatplotlibRenderer:
             x_stripe = 0.075  # stripe left edge (tight after number)
             stripe_w = 0.013  # thin stripe
             x_drv    = 0.105  # driver name (tight after stripe)
-            x_gap    = 0.63   # gap right-aligned from here
+            x_gap    = 0.45   # gap right-aligned from here
             hdr_y    = 0.94
             row_h    = 0.76 / max(n, 1)
             row_tops = [0.86 - i * row_h for i in range(n)]
@@ -295,23 +295,17 @@ class MatplotlibRenderer:
 
                 # Gap / laptime — pill background
                 if rank == 0:
-                    gap_label   = _fmt_laptime(leader_lt) if all_finished else "LEADER"
-                    gap_color   = _WHITE
-                    pill_color  = (0.12, 0.12, 0.12)
+                    gap_label = _fmt_laptime(leader_lt) if all_finished else "LEADER"
+                    gap_color = _WHITE
                 else:
                     nd_ldr = ranked[0].at(t)[2]
                     gap_s  = max(drv.time_at_norm_dist(nd_ldr)
                                  - ranked[0].time_at_norm_dist(nd_ldr), 0.0)
-                    gap_label  = f"+{gap_s:.3f}s"
-                    gap_color  = drv.color
-                    # Pill: very dark tint of driver colour
-                    h = drv.color.lstrip("#")
-                    pill_color = tuple(int(h[i:i+2], 16) / 255 * 0.25 for i in (0, 2, 4))
+                    gap_label = f"+{gap_s:.3f}s"
+                    gap_color = drv.color
                 ax_board.text(x_gap, cy, gap_label,
                               color=gap_color, fontsize=16, fontweight="bold",
-                              va="center", fontfamily=_font,
-                              bbox=dict(boxstyle="round,pad=0.3",
-                                        facecolor=pill_color, edgecolor="none"))
+                              va="center", fontfamily=_font)
 
                 # Row bottom divider
                 ax_board.axhline(row_tops[rank] - row_h,
