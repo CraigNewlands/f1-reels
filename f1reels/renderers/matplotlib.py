@@ -253,49 +253,45 @@ class MatplotlibRenderer:
             leader_lt    = finished[0].official_laptime_s if finished else None
 
             n = len(ranked)
-            # ── Table geometry ────────────────────────────────────────────
-            # Layout: [POS] [█ coloured stripe] [DRIVER]        [GAP]
-            x_pos_num = 0.03   # position number centre
-            x_stripe  = 0.13   # coloured vertical stripe left edge
-            x_drv     = 0.20   # driver name left edge
-            x_gap     = 0.65   # gap left edge
-            stripe_w  = 0.025  # width of coloured stripe
-            hdr_y     = 0.94
-            row_h     = 0.76 / max(n, 1)
-            row_tops  = [0.86 - i * row_h for i in range(n)]
+            # Layout matches F1 live timing:
+            #  [num][█stripe][DRIVER]                      [GAP]
+            x_num    = 0.035  # position number right-align to here
+            x_stripe = 0.075  # stripe left edge (tight after number)
+            stripe_w = 0.013  # thin stripe
+            x_drv    = 0.105  # driver name (tight after stripe)
+            x_gap    = 0.63   # gap right-aligned from here
+            hdr_y    = 0.94
+            row_h    = 0.76 / max(n, 1)
+            row_tops = [0.86 - i * row_h for i in range(n)]
 
-            # Column headers
-            for label, x in [("POS", x_pos_num - 0.01),
-                              ("DRIVER", x_drv),
-                              ("GAP", x_gap)]:
-                ax_board.text(x, hdr_y, label, color=_DIM, fontsize=9,
-                              fontweight="bold", va="center", fontfamily=_font)
+            # "POSITION" header
+            ax_board.text(0.02, hdr_y, "POSITION", color=_DIM, fontsize=9,
+                          fontweight="bold", va="center", fontfamily=_font)
+            ax_board.text(x_gap, hdr_y, "GAP", color=_DIM, fontsize=9,
+                          fontweight="bold", va="center", fontfamily=_font)
             ax_board.axhline(hdr_y - 0.07, color=_DIM, lw=0.5, alpha=0.5)
 
             for rank, drv in enumerate(ranked):
                 cy = row_tops[rank] - row_h / 2
 
-                # Row background
-                row_bg = 0.055 if rank % 2 == 0 else 0.035
+                # Alternating row background
+                row_bg = 0.06 if rank % 2 == 0 else 0.04
                 ax_board.barh(cy, 0.97, height=row_h * 0.92, left=0.01,
                               color=[row_bg] * 3, zorder=0)
 
-                # Position number (left)
-                ax_board.text(x_pos_num, cy, str(rank + 1),
-                              color=_WHITE, fontsize=15, fontweight="black",
-                              va="center", ha="center", fontfamily=_font)
+                # Position number — right-aligned so it sits tight to stripe
+                ax_board.text(x_num, cy, str(rank + 1),
+                              color=_WHITE, fontsize=14, fontweight="black",
+                              va="center", ha="right", fontfamily=_font)
 
-                # Coloured vertical stripe (team colour)
+                # Coloured stripe immediately after number
                 ax_board.barh(cy, stripe_w, height=row_h * 0.88,
                               left=x_stripe, color=drv.color, zorder=2)
 
-                # Driver abbreviation (right of stripe)
+                # Driver abbreviation right after stripe
                 ax_board.text(x_drv, cy, drv.abbr,
-                              color=_WHITE, fontsize=16, fontweight="black",
+                              color=_WHITE, fontsize=15, fontweight="black",
                               va="center", fontfamily=_font)
-
-                # Thin vertical divider before gap col
-                ax_board.axvline(x_gap - 0.03, color=_DIM, lw=0.4, alpha=0.35)
 
                 # Gap / laptime
                 if rank == 0:
