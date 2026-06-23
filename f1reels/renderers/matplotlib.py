@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter, FuncAnimation
+import matplotlib.patheffects as pe
 from matplotlib.collections import LineCollection
 
 from f1reels.pipeline.models import DriverFrames, TrackShape
@@ -145,7 +146,11 @@ class MatplotlibRenderer:
                                   markeredgecolor=_WHITE, markeredgewidth=1.5, zorder=4)
             lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
                                   fontsize=11, fontweight="bold",
-                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5)
+                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5,
+                                  path_effects=[
+                                      pe.withStroke(linewidth=2.5, foreground=_WHITE),
+                                      pe.Normal(),
+                                  ])
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
