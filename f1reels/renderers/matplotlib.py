@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,6 +16,24 @@ from matplotlib.collections import LineCollection
 from f1reels.pipeline.models import DriverFrames, TrackShape
 
 matplotlib.use("Agg")
+
+
+def _ensure_f1_font() -> str:
+    """Download Titillium Web Bold (closest free match to F1 display font)
+    and register it with matplotlib.  Returns the family name to use."""
+    from matplotlib import font_manager
+    font_dir  = Path.home() / ".cache" / "f1reels" / "fonts"
+    font_dir.mkdir(parents=True, exist_ok=True)
+    font_path = font_dir / "TitilliumWeb-Bold.ttf"
+    if not font_path.exists():
+        url = ("https://github.com/google/fonts/raw/main/ofl/titilliumweb/"
+               "TitilliumWeb-Bold.ttf")
+        try:
+            urllib.request.urlretrieve(url, font_path)
+        except Exception:
+            return "sans-serif"
+    font_manager.fontManager.addfont(str(font_path))
+    return "Titillium Web"
 
 _W, _H   = 9, 16
 _DPI     = 120
@@ -64,6 +83,7 @@ class MatplotlibRenderer:
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg not found in PATH — brew install ffmpeg")
 
+        _font = _ensure_f1_font()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         total_frames = fps * int(duration_s)
         zoom_anim_frames = int(_ZOOM_ANIM_S * fps)
@@ -145,7 +165,7 @@ class MatplotlibRenderer:
                                   markeredgecolor=_WHITE, markeredgewidth=1.5, zorder=4)
             lbl   = ax_track.text(0, 0, drv.abbr, color=drv.color,
                                   fontsize=11, fontweight="bold",
-                                  ha="center", va="bottom", fontfamily="sans-serif", zorder=5)
+                                  ha="center", va="bottom", fontfamily=_font, zorder=5)
             dot_artists[drv.abbr] = (halo, dot, lbl)
 
         # label offset (updated each frame based on viewport)
@@ -233,53 +253,49 @@ class MatplotlibRenderer:
             leader_lt    = finished[0].official_laptime_s if finished else None
 
             n = len(ranked)
-            # Table geometry
-            col_pos   = 0.02   # left edge of position col
-            col_drv   = 0.22   # left edge of driver col
-            col_gap   = 0.62   # left edge of gap col
-            hdr_y     = 0.92   # header row centre
-            row_h     = 0.72 / max(n, 1)   # height per data row
-            row_tops  = [0.82 - i * row_h for i in range(n)]  # top of each row
+            # ── Table geometry ────────────────────────────────────────────
+            # Layout: [POS] [█ coloured stripe] [DRIVER]        [GAP]
+            x_pos_num = 0.03   # position number centre
+            x_stripe  = 0.13   # coloured vertical stripe left edge
+            x_drv     = 0.20   # driver name left edge
+            x_gap     = 0.65   # gap left edge
+            stripe_w  = 0.025  # width of coloured stripe
+            hdr_y     = 0.94
+            row_h     = 0.76 / max(n, 1)
+            row_tops  = [0.86 - i * row_h for i in range(n)]
 
             # Column headers
-            for label, x in [("POS", col_pos), ("DRIVER", col_drv), ("GAP", col_gap)]:
+            for label, x in [("POS", x_pos_num - 0.01),
+                              ("DRIVER", x_drv),
+                              ("GAP", x_gap)]:
                 ax_board.text(x, hdr_y, label, color=_DIM, fontsize=9,
-                              fontweight="bold", va="center", fontfamily="sans-serif")
-            # Header divider
-            ax_board.axhline(hdr_y - 0.06, color=_DIM, lw=0.6, alpha=0.6)
+                              fontweight="bold", va="center", fontfamily=_font)
+            ax_board.axhline(hdr_y - 0.07, color=_DIM, lw=0.5, alpha=0.5)
 
             for rank, drv in enumerate(ranked):
-                cy = row_tops[rank] - row_h / 2   # row centre y
+                cy = row_tops[rank] - row_h / 2
 
-                # Alternating subtle row background
-                row_bg = 0.06 if rank % 2 == 0 else 0.04
-                ax_board.barh(cy, 0.96, height=row_h * 0.95, left=0.02,
+                # Row background
+                row_bg = 0.055 if rank % 2 == 0 else 0.035
+                ax_board.barh(cy, 0.97, height=row_h * 0.92, left=0.01,
                               color=[row_bg] * 3, zorder=0)
 
-                # Coloured left stripe (team colour, 1.2% wide)
-                ax_board.barh(cy, 0.012, height=row_h * 0.95, left=0.002,
-                              color=drv.color, zorder=1)
+                # Position number (left)
+                ax_board.text(x_pos_num, cy, str(rank + 1),
+                              color=_WHITE, fontsize=15, fontweight="black",
+                              va="center", ha="center", fontfamily=_font)
 
-                # Position number
-                ax_board.text(col_pos + 0.08, cy, str(rank + 1),
-                              color=_WHITE, fontsize=14, fontweight="black",
-                              va="center", ha="center", fontfamily="sans-serif")
+                # Coloured vertical stripe (team colour)
+                ax_board.barh(cy, stripe_w, height=row_h * 0.88,
+                              left=x_stripe, color=drv.color, zorder=2)
 
-                # Vertical divider after position
-                ax_board.axvline(col_drv - 0.02, ymin=(cy - row_h * 0.4 + 0) / 1.0,
-                                 ymax=(cy + row_h * 0.4) / 1.0,
-                                 color=_DIM, lw=0.4, alpha=0.4)
+                # Driver abbreviation (right of stripe)
+                ax_board.text(x_drv, cy, drv.abbr,
+                              color=_WHITE, fontsize=16, fontweight="black",
+                              va="center", fontfamily=_font)
 
-                # Driver abbreviation
-                ax_board.text(col_drv + 0.01, cy, drv.abbr,
-                              color=drv.color, fontsize=16, fontweight="black",
-                              va="center", fontfamily="sans-serif")
-
-                # Vertical divider before gap
-                ax_board.axvline(col_gap - 0.02,
-                                 ymin=(cy - row_h * 0.4) / 1.0,
-                                 ymax=(cy + row_h * 0.4) / 1.0,
-                                 color=_DIM, lw=0.4, alpha=0.4)
+                # Thin vertical divider before gap col
+                ax_board.axvline(x_gap - 0.03, color=_DIM, lw=0.4, alpha=0.35)
 
                 # Gap / laptime
                 if rank == 0:
@@ -291,13 +307,13 @@ class MatplotlibRenderer:
                                  - ranked[0].time_at_norm_dist(nd_ldr), 0.0)
                     gap_label = f"+{gap_s:.3f}s"
                     gap_color = _MID
-                ax_board.text(col_gap + 0.01, cy, gap_label,
+                ax_board.text(x_gap, cy, gap_label,
                               color=gap_color, fontsize=13, fontweight="bold",
-                              va="center", fontfamily="sans-serif")
+                              va="center", fontfamily=_font)
 
                 # Row bottom divider
                 ax_board.axhline(row_tops[rank] - row_h,
-                                 color=_DIM, lw=0.4, alpha=0.35)
+                                 color=_DIM, lw=0.4, alpha=0.3)
 
             if progress_cb is not None:
                 progress_cb(frame + 1, total_frames)
@@ -308,9 +324,9 @@ class MatplotlibRenderer:
         title = event_name.upper() if event_name else "GRAND PRIX"
         ax_top.text(0.5, 0.70, title,
                     color=_WHITE, fontsize=20, fontweight="black",
-                    ha="center", va="center", fontfamily="sans-serif")
+                    ha="center", va="center", fontfamily=_font)
         ax_top.text(0.5, 0.20, f"QUALIFYING  ·  TOP {len(drivers)}",
-                    color=_DIM, fontsize=13, ha="center", va="center", fontfamily="sans-serif")
+                    color=_DIM, fontsize=13, ha="center", va="center", fontfamily=_font)
 
         # ── Render ────────────────────────────────────────────────────────
         anim   = FuncAnimation(fig, animate, frames=total_frames, interval=1000 / fps)
